@@ -114,6 +114,12 @@ class MemoryCandidate(TramaContract):
         return self
 
 
+class MemorySearchRequest(TramaContract):
+    organization_id: str = Field(default="default", min_length=1, max_length=100)
+    project_id: str = Field(min_length=1, max_length=100)
+    query: str = Field(min_length=1, max_length=1000)
+
+
 class PromotionRequest(TramaContract):
     schema_version: Literal["1.0"] = "1.0"
     promotion_id: str = Field(min_length=1, max_length=200)

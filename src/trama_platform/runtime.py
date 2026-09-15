@@ -37,12 +37,12 @@ class InMemoryContextMemory(ContextMemoryPort):
     def get_candidate(self, candidate_id: str) -> MemoryCandidate | None:
         return self.candidates.get(candidate_id)
 
-    def search(self, project_id: str, query: str) -> list[MemoryCandidate]:
+    def search(self, organization_id: str, project_id: str, query: str) -> list[MemoryCandidate]:
         normalized = query.casefold()
         return [
             candidate
             for candidate in self.candidates.values()
-            if can_read_candidate(candidate, project_id)
+            if can_read_candidate(candidate, organization_id, project_id)
             and normalized in f"{candidate.subject} {candidate.fact}".casefold()
         ]
 
@@ -52,7 +52,7 @@ class InMemoryCanonicalKnowledge(CanonicalKnowledgePort):
     published: dict[str, PromotionRequest] = field(default_factory=dict)
 
     def publish(self, request: PromotionRequest, candidate: MemoryCandidate) -> str:
-        if not can_promote(request, candidate.project_id):
+        if not can_promote(request, candidate):
             raise PermissionError("La promocion no esta aprobada para el proyecto")
         if candidate.status != "validated":
             raise ValueError("Solo se puede publicar un candidato validado")
@@ -73,6 +73,12 @@ class ProjectRegistry:
         self.projects[manifest.project_id] = manifest
         return manifest
 
+    def get(self, project_id: str) -> ProjectManifest:
+        try:
+            return self.projects[project_id]
+        except KeyError as exc:
+            raise KeyError(f"El proyecto {project_id} no esta registrado") from exc
+
 
 class TramaRuntime:
     """Orquesta el flujo minimo sin acoplarlo a un proveedor externo."""
@@ -88,25 +94,47 @@ class TramaRuntime:
         self.context_memory = context_memory or InMemoryContextMemory()
         self.canonical_knowledge = canonical_knowledge or InMemoryCanonicalKnowledge()
         self.projects = ProjectRegistry()
+        self.tasks: dict[str, TaskEnvelope] = {}
 
     def register_project(self, manifest: ProjectManifest) -> ProjectManifest:
         return self.projects.register(manifest)
 
     def submit_task(self, task: TaskEnvelope) -> str:
-        if task.project_id not in self.projects.projects:
-            raise KeyError(f"El proyecto {task.project_id} no esta registrado")
+        project = self.projects.get(task.project_id)
+        if task.organization_id != project.organization_id:
+            raise ValueError("La organizacion de la tarea no coincide con el proyecto")
+        if task.repository != project.repository:
+            raise ValueError("El repositorio de la tarea no coincide con el proyecto")
+        existing = self.tasks.get(task.task_id)
+        if existing and existing.model_dump(mode="json") != task.model_dump(mode="json"):
+            raise ValueError(f"La tarea {task.task_id} ya existe con otra configuracion")
+        self.tasks[task.task_id] = task
         return self.coordination.submit_task(task)
 
     def record_result(self, result: AgentResult) -> None:
+        if result.task_id not in self.tasks:
+            raise KeyError(f"La tarea {result.task_id} no esta registrada")
         self.coordination.record_result(result)
 
     def capture_memory(self, candidate: MemoryCandidate) -> str:
-        if candidate.project_id not in self.projects.projects:
-            raise KeyError(f"El proyecto {candidate.project_id} no esta registrado")
+        project = self.projects.get(candidate.project_id)
+        if candidate.organization_id != project.organization_id:
+            raise ValueError("La organizacion de la memoria no coincide con el proyecto")
         return self.context_memory.put_candidate(candidate)
+
+    def search_memory(
+        self, organization_id: str, project_id: str, query: str
+    ) -> list[MemoryCandidate]:
+        project = self.projects.get(project_id)
+        if organization_id != project.organization_id:
+            raise ValueError("La organizacion de la busqueda no coincide con el proyecto")
+        return list(self.context_memory.search(organization_id, project_id, query))
 
     def promote(self, request: PromotionRequest) -> str:
         candidate = self.context_memory.get_candidate(request.candidate_id)
         if candidate is None:
             raise KeyError(f"El candidato {request.candidate_id} no existe")
+        project = self.projects.get(request.project_id)
+        if request.organization_id != project.organization_id:
+            raise ValueError("La organizacion de la promocion no coincide con el proyecto")
         return self.canonical_knowledge.publish(request, candidate)

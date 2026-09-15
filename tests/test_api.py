@@ -40,3 +40,32 @@ def test_api_rejects_task_for_unknown_project():
         "acceptance_criteria": ["tests pass"],
     }
     assert client.post("/v1/tasks", json=task).status_code == 404
+
+
+def test_api_searches_memory_inside_an_organization_and_project():
+    runtime = TramaRuntime()
+    client = TestClient(create_app(runtime))
+    project = {
+        "project_id": "demo",
+        "organization_id": "org-a",
+        "repository": "https://example.test/repo",
+    }
+    assert client.post("/v1/projects", json=project).status_code == 201
+    candidate = {
+        "candidate_id": "candidate-a",
+        "organization_id": "org-a",
+        "project_id": "demo",
+        "subject": "tests",
+        "fact": "tests pass",
+        "evidence": [{"source": "ci", "locator": "run/1"}],
+        "confidence": 1,
+    }
+    assert client.post("/v1/memory/candidates", json=candidate).status_code == 201
+
+    response = client.post(
+        "/v1/memory/search",
+        json={"organization_id": "org-a", "project_id": "demo", "query": "tests"},
+    )
+
+    assert response.status_code == 200
+    assert [item["candidate_id"] for item in response.json()] == ["candidate-a"]
