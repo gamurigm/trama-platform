@@ -20,6 +20,14 @@ reglas de seguridad.
 - **MCP:** conexión controlada con herramientas y servicios.
 - **Model Gateway:** selección de modelos, límites y proveedores.
 
+## Arquitectura de alto nivel
+
+![Arquitectura de alto nivel de TRAMA](docs/arquitectura-trama.svg)
+
+La imagen muestra la frontera principal: Hermes interactúa con TRAMA por MCP,
+TRAMA mantiene las políticas y la evidencia, CCCC coordina actores, y los
+proyectos conectados conservan su propio código y ciclo de vida.
+
 ## Entorno propio
 
 TRAMA utiliza su propio entorno Python. No reutiliza el `.venv` del dashboard.

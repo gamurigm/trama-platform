@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="860" viewBox="0 0 1400 860" role="img" aria-labelledby="title desc">
+  <title id="title">Arquitectura de alto nivel de TRAMA</title>
+  <desc id="desc">Hermes interactúa con TRAMA mediante MCP stdio. TRAMA coordina CCCC, agentes, proyectos, memoria, conocimiento canónico y proveedores de modelos.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#111c33"/>
+    </linearGradient>
+    <linearGradient id="trama" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#1d4ed8"/>
+    </linearGradient>
+    <linearGradient id="hermes" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7c3aed"/>
+      <stop offset="1" stop-color="#6d28d9"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000" flood-opacity=".25"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#93c5fd"/>
+    </marker>
+    <marker id="arrowPurple" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#c4b5fd"/>
+    </marker>
+    <style>
+      .title { font: 700 36px 'Segoe UI', Arial, sans-serif; fill: #f8fafc; }
+      .subtitle { font: 400 17px 'Segoe UI', Arial, sans-serif; fill: #bfdbfe; }
+      .label { font: 700 19px 'Segoe UI', Arial, sans-serif; fill: #f8fafc; }
+      .body { font: 400 15px 'Segoe UI', Arial, sans-serif; fill: #dbeafe; }
+      .small { font: 600 13px 'Segoe UI', Arial, sans-serif; fill: #c4b5fd; letter-spacing: .4px; }
+      .line { fill: none; stroke: #93c5fd; stroke-width: 2.5; marker-end: url(#arrow); }
+      .line-purple { fill: none; stroke: #c4b5fd; stroke-width: 2.5; marker-end: url(#arrowPurple); }
+      .box { stroke: #334155; stroke-width: 1.5; rx: 18; filter: url(#shadow); }
+      .panel { fill: #172554; stroke: #1e40af; stroke-width: 2; rx: 26; }
+    </style>
+  </defs>
+
+  <rect width="1400" height="860" fill="url(#bg)"/>
+  <circle cx="1240" cy="80" r="220" fill="#1e3a8a" opacity=".16"/>
+  <circle cx="80" cy="780" r="260" fill="#4c1d95" opacity=".12"/>
+
+  <text x="70" y="72" class="title">TRAMA · plataforma multi-proyecto</text>
+  <text x="70" y="105" class="subtitle">Coordinación de agentes, memoria contextual, evidencia y conocimiento canónico</text>
+
+  <!-- User and local Hermes -->
+  <rect x="70" y="180" width="250" height="126" class="box" fill="url(#hermes)"/>
+  <text x="100" y="220" class="small">INTERFAZ LOCAL SUPERVISADA</text>
+  <text x="100" y="253" class="label">Hermes Agent</text>
+  <text x="100" y="279" class="body">Conversación · modelo · skills</text>
+  <text x="100" y="300" class="body">Memoria operativa privada</text>
+
+  <rect x="70" y="350" width="250" height="105" class="box" fill="#1e293b"/>
+  <text x="100" y="389" class="small">PERSONA</text>
+  <text x="100" y="420" class="label">Usuario</text>
+  <text x="100" y="444" class="body">Aprobación humana y objetivos</text>
+
+  <path d="M195 350 L195 307" class="line-purple"/>
+  <text x="215" y="333" class="small">SUPERVISA</text>
+
+  <!-- TRAMA boundary -->
+  <rect x="390" y="145" width="650" height="590" class="panel"/>
+  <text x="430" y="188" class="small">FUENTE DE VERDAD DEL SISTEMA</text>
+  <text x="430" y="225" class="label" font-size="28">TRAMA API + Orchestrator</text>
+  <text x="430" y="252" class="body">Contratos versionados · políticas · namespaces · evidencia</text>
+
+  <rect x="430" y="290" width="270" height="145" class="box" fill="url(#trama)"/>
+  <text x="460" y="329" class="small">COORDINACIÓN</text>
+  <text x="460" y="362" class="label">CCCC</text>
+  <text x="460" y="389" class="body">Tareas · actores · handoffs</text>
+  <text x="460" y="412" class="body">Estados y resultados</text>
+
+  <rect x="730" y="290" width="270" height="145" class="box" fill="#0f766e"/>
+  <text x="760" y="329" class="small">PROYECTOS</text>
+  <text x="760" y="362" class="label">Project Registry</text>
+  <text x="760" y="389" class="body">Manifiestos y capacidades</text>
+  <text x="760" y="412" class="body">Reglas por organización</text>
+
+  <rect x="430" y="480" width="270" height="145" class="box" fill="#155e75"/>
+  <text x="460" y="519" class="small">CONTEXTO Y EVIDENCIA</text>
+  <text x="460" y="552" class="label">Memoria contextual</text>
+  <text x="460" y="579" class="body">Candidatos con provenance</text>
+  <text x="460" y="602" class="body">Búsqueda aislada por proyecto</text>
+
+  <rect x="730" y="480" width="270" height="145" class="box" fill="#854d0e"/>
+  <text x="760" y="519" class="small">CONOCIMIENTO</text>
+  <text x="760" y="552" class="label">Utopia</text>
+  <text x="760" y="579" class="body">Conocimiento canónico</text>
+  <text x="760" y="602" class="body">Promoción validada y humana</text>
+
+  <!-- External systems -->
+  <rect x="1110" y="170" width="220" height="130" class="box" fill="#334155"/>
+  <text x="1140" y="210" class="small">EJECUTORES</text>
+  <text x="1140" y="243" class="label">Codex · OpenCode</text>
+  <text x="1140" y="270" class="body">Agentes especializados</text>
+
+  <rect x="1110" y="355" width="220" height="130" class="box" fill="#334155"/>
+  <text x="1140" y="395" class="small">PROVEEDORES</text>
+  <text x="1140" y="428" class="label">Model Gateway</text>
+  <text x="1140" y="455" class="body">Modelos · límites · costes</text>
+
+  <rect x="1110" y="540" width="220" height="130" class="box" fill="#334155"/>
+  <text x="1140" y="580" class="small">SERVICIOS</text>
+  <text x="1140" y="613" class="label">MCP / herramientas</text>
+  <text x="1140" y="640" class="body">Integraciones controladas</text>
+
+  <!-- Connections -->
+  <path d="M320 243 C350 243 360 243 390 243" class="line-purple"/>
+  <text x="326" y="225" class="small">MCP stdio</text>
+
+  <path d="M1040 350 C1070 350 1080 235 1110 235" class="line"/>
+  <text x="1042" y="300" class="small">delegación</text>
+
+  <path d="M1040 415 C1070 415 1080 420 1110 420" class="line"/>
+  <text x="1040" y="400" class="small">modelos</text>
+
+  <path d="M1040 550 C1070 550 1080 605 1110 605" class="line"/>
+  <text x="1038" y="575" class="small">puertos</text>
+
+  <!-- Footer principles -->
+  <rect x="70" y="770" width="1260" height="52" rx="14" fill="#0f172a" stroke="#334155"/>
+  <text x="100" y="803" class="body">Aislamiento por organization_id + project_id</text>
+  <text x="520" y="803" class="body">·</text>
+  <text x="550" y="803" class="body">Evidencia antes de promoción</text>
+  <text x="890" y="803" class="body">·</text>
+  <text x="920" y="803" class="body">Secretos fuera de contratos y memoria compartida</text>
+</svg>
