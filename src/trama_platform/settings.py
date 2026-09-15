@@ -17,6 +17,17 @@ def _read_int(name: str, default: int) -> int:
         raise ValueError(f"{name} debe ser un entero") from exc
 
 
+def _default_hermes_config_path() -> str:
+    hermes_home = os.getenv("HERMES_HOME")
+    if hermes_home:
+        return str(Path(hermes_home) / "config.yaml")
+    if os.name == "nt":
+        local_app_data = os.getenv("LOCALAPPDATA")
+        if local_app_data:
+            return str(Path(local_app_data) / "hermes" / "config.yaml")
+    return "~/.hermes/config.yaml"
+
+
 @dataclass(frozen=True)
 class TramaSettings:
     environment: str = "local"
@@ -51,6 +62,6 @@ class TramaSettings:
             cccc_timeout_seconds=_read_int("TRAMA_CCCC_TIMEOUT_SECONDS", 30),
             hermes_executable=os.getenv("TRAMA_HERMES_EXECUTABLE", "hermes"),
             hermes_config_path=os.getenv(
-                "TRAMA_HERMES_CONFIG_PATH", "~/.hermes/config.yaml"
+                "TRAMA_HERMES_CONFIG_PATH", _default_hermes_config_path()
             ),
         )
