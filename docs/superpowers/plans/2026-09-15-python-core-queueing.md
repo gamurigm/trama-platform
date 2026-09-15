@@ -42,7 +42,7 @@
 - TaskDispatcher.status() -> dict[str, object] devuelve queue_depth, queue_capacity, active_dispatches, max_concurrency y dispatcher_status.
 - TaskDispatcher.wait_for_idle(timeout: float) -> bool es un helper local de pruebas; close() -> None detiene workers de forma idempotente.
 
-- [ ] Step 1: Write the failing test
+- [x] Step 1: Write the failing test
 
 Crear tests/test_queueing.py con una tarea válida, una coordinación bloqueable y estas expectativas:
 
@@ -95,13 +95,13 @@ def test_dispatcher_releases_reservation_when_persistence_fails():
 
 Definir en el mismo archivo los helpers make_task, BlockingCoordination y RecordingCoordination. La coordinación bloqueable debe contar active y peak bajo un Lock, señalizar started, esperar un Event release y disminuir active al terminar.
 
-- [ ] Step 2: Run tests to verify they fail
+- [x] Step 2: Run tests to verify they fail
 
 Run: .\\.venv\\Scripts\\python.exe -m pytest tests/test_queueing.py -q
 
 Expected: FAIL porque no existen BoundedTaskQueue, QueueCapacityError, TaskDispatcher ni TaskQueuePort.
 
-- [ ] Step 3: Write minimal implementation
+- [x] Step 3: Write minimal implementation
 
 Añadir TaskQueuePort a ports.py y crear queueing.py con este constructor:
 
@@ -122,13 +122,13 @@ Usar queue.Queue(maxsize=queue_capacity), BoundedSemaphore(queue_capacity + max_
 
 Cada worker consulta current_task antes de despachar, ignora una tarea ya cancelled, persiste state=running mediante transition, llama a coordination.submit_task y libera la reserva en finally. Si el coordinador falla, llama a transition con state=failed, acción task.dispatch, estado de evento failed y solamente error_type y mensaje truncado/sanitizado. recover usa la misma reserva y cola sin llamar al callback de persistencia. Validar queue_capacity >= 1, max_concurrency >= 1 y dispatch_timeout_seconds >= 1.
 
-- [ ] Step 4: Run tests to verify they pass
+- [x] Step 4: Run tests to verify they pass
 
 Run: .\\.venv\\Scripts\\python.exe -m pytest tests/test_queueing.py -q
 
 Expected: PASS, incluyendo rechazo de capacidad, máximo de dos workers y rollback de una persistencia fallida.
 
-- [ ] Step 5: Commit
+- [x] Step 5: Commit
 
 ~~~powershell
 git add src/trama_platform/ports.py src/trama_platform/queueing.py tests/test_queueing.py
@@ -151,7 +151,7 @@ git commit -m "feat: add bounded task dispatcher"
 - TramaRuntime.submit_task(task: TaskEnvelope) -> str valida, aplica idempotencia, admite y persiste antes de devolver el id.
 - TramaRuntime.status() conserva sus campos y añade las métricas del dispatcher; close() -> None es idempotente.
 
-- [ ] Step 1: Write the failing test
+- [x] Step 1: Write the failing test
 
 Añadir pruebas con coordinación grabable y bloqueable:
 
@@ -196,13 +196,13 @@ Completar con una prueba donde el coordinador falla y deja state=failed más un 
 
 Definir en tests/test_runtime.py los helpers task(task_id) y runtime_with_blocking_coordination(queue_capacity, max_concurrency) con organización org-a, proyecto demo y repositorio repo-a; reutilizar manifest() existente. El helper de runtime debe devolver también la coordinación bloqueable para que la prueba libere sus Events antes de close().
 
-- [ ] Step 2: Run tests to verify they fail
+- [x] Step 2: Run tests to verify they fail
 
 Run: .\\.venv\\Scripts\\python.exe -m pytest tests/test_runtime.py tests/test_state_store.py -q
 
 Expected: FAIL porque el runtime despacha directamente a CoordinationPort, no tiene cola/cierre y StateStorePort no tiene persistencia de transición.
 
-- [ ] Step 3: Write minimal implementation
+- [x] Step 3: Write minimal implementation
 
 Crear el dispatcher después de cargar proyectos/tareas y conectar callbacks privados del runtime. En submit_task, validar organización/proyecto/repositorio, comparar identidad ignorando solo state y created_at, reservar mediante TaskDispatcher.submit y persistir accepted más task.submit antes de publicar. Una tarea idéntica ya existente devolverá su id sin duplicar cola ni evento.
 
@@ -212,13 +212,13 @@ Durante la recuperación, normalizar y guardar como accepted las tareas running,
 
 En SqliteStateStore, extraer una operación que reciba una conexión abierta y escriba state_records de la tarea y operation_events en una sola transacción. Conservar save_task y append_event para consumidores existentes.
 
-- [ ] Step 4: Run tests to verify they pass
+- [x] Step 4: Run tests to verify they pass
 
 Run: .\\.venv\\Scripts\\python.exe -m pytest tests/test_runtime.py tests/test_state_store.py -q
 
 Expected: PASS, incluyendo namespaces, promociones, SQLite, eventos y lifecycle existente.
 
-- [ ] Step 5: Commit
+- [x] Step 5: Commit
 
 ~~~powershell
 git add src/trama_platform/ports.py src/trama_platform/state_store.py src/trama_platform/runtime.py tests/test_runtime.py tests/test_state_store.py
@@ -245,19 +245,19 @@ git commit -m "feat: dispatch runtime tasks through bounded queue"
 - GET /v1/status añade queue_depth, queue_capacity, active_dispatches, max_concurrency y dispatcher_status.
 - El lifespan de FastAPI llama runtime.close() al apagar la app; la rama trama api pasa TramaSettings a create_app.
 
-- [ ] Step 1: Write the failing test
+- [x] Step 1: Write the failing test
 
 En tests/test_settings.py, añadir defaults 100/4/900 y parametrizar "0", "-1" y "not-an-int" para las tres variables, esperando ValueError con el nombre de la variable. En tests/test_api.py, inyectar un runtime de capacidad 1+1 con coordinación bloqueable, comprobar 429, código queue_full, Retry-After: 1, ausencia de la tarea rechazada y los cinco campos de status. Añadir shutdown repetido sin excepción.
 
 En tests/test_cli_gateway.py, comprobar que la rama api pasa los tres campos de TramaSettings al runtime/app y que config get --json los expone sin secretos.
 
-- [ ] Step 2: Run tests to verify they fail
+- [x] Step 2: Run tests to verify they fail
 
 Run: .\\.venv\\Scripts\\python.exe -m pytest tests/test_settings.py tests/test_api.py tests/test_cli_gateway.py -q
 
 Expected: FAIL porque las variables no están en TramaSettings, la API no captura QueueCapacityError, status no tiene métricas de cola y shutdown no cierra el runtime.
 
-- [ ] Step 3: Write minimal implementation
+- [x] Step 3: Write minimal implementation
 
 Añadir un lector de entero positivo conservando el error de entero inválido y estos valores exactos:
 
@@ -271,13 +271,13 @@ Actualizar create_app con settings keyword-only; cuando no haya runtime inyectad
 
 Actualizar .env.example, config get, README y docs/ARQUITECTURA.md para explicar la capacidad máxima queue_capacity + max_concurrency, el 429 esperado y que la cola es local al proceso. Conservar la documentación existente de API, MCP, CCCC y Hermes.
 
-- [ ] Step 4: Run tests to verify they pass
+- [x] Step 4: Run tests to verify they pass
 
 Run: .\\.venv\\Scripts\\python.exe -m pytest tests/test_settings.py tests/test_api.py tests/test_cli_gateway.py -q
 
 Expected: PASS, incluidos los tests previos de CLI, CCCC, Hermes, API, lifecycle y aislamiento.
 
-- [ ] Step 5: Commit
+- [x] Step 5: Commit
 
 ~~~powershell
 git add .env.example README.md docs/ARQUITECTURA.md src/trama_platform/settings.py src/trama_platform/api.py src/trama_platform/cli.py tests/test_settings.py tests/test_api.py tests/test_cli_gateway.py
@@ -294,7 +294,7 @@ git commit -m "feat: expose task queue backpressure"
 - Los contratos públicos actuales continúan exportándose sin cambios de esquema.
 - El smoke local muestra API ready, métricas de cola y MCP stdio con exactamente cinco herramientas.
 
-- [ ] Step 1: Run the complete verification commands
+- [x] Step 1: Run the complete verification commands
 
 Run, en este orden:
 
@@ -307,16 +307,16 @@ git diff --check
 
 Expected: todos los comandos salen con código 0, las nuevas pruebas pasan y los esquemas versionados no cambian.
 
-- [ ] Step 2: Run the local API and MCP smoke check
+- [x] Step 2: Run the local API and MCP smoke check
 
 Iniciar la API en 127.0.0.1:8090, consultar /v1/status y confirmar queue_depth, queue_capacity, active_dispatches, max_concurrency y dispatcher_status. Iniciar después trama mcp --api-url http://127.0.0.1:8090 con el cliente oficial MCP y verificar exactamente trama_register_project, trama_search_context, trama_submit_task, trama_record_result y trama_capture_memory. Detener únicamente los procesos iniciados y comprobar que 8090 deja de responder.
 
-- [ ] Step 3: Review repository state
+- [x] Step 3: Review repository state
 
 Run: git status --short --branch, git log --oneline -8, git diff --stat origin/main...HEAD, git diff --check
 
 Confirmar que los commits solo contienen dispatcher, integración, configuración/documentación y pruebas. Reportar por separado AGENTS.md y refact1.md; no agregarlos, modificarlos ni borrarlos.
 
-- [ ] Step 4: Commit verification adjustments if required
+- [x] Step 4: Commit verification adjustments if required
 
 Si una verificación exige un ajuste, añadir solo el archivo afectado y usar un mensaje específico como fix: address queue verification finding. Si toda la verificación pasa, no crear un commit vacío.
