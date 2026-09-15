@@ -1,0 +1,113 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "task_id": {
+      "maxLength": 100,
+      "minLength": 1,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$",
+      "title": "Task Id",
+      "type": "string"
+    },
+    "parent_task_id": {
+      "anyOf": [
+        {
+          "maxLength": 100,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Parent Task Id"
+    },
+    "organization_id": {
+      "default": "default",
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Organization Id",
+      "type": "string"
+    },
+    "project_id": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Project Id",
+      "type": "string"
+    },
+    "objective": {
+      "maxLength": 4000,
+      "minLength": 1,
+      "title": "Objective",
+      "type": "string"
+    },
+    "actor": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Actor",
+      "type": "string"
+    },
+    "repository": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Repository",
+      "type": "string"
+    },
+    "branch": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Branch",
+      "type": "string"
+    },
+    "worktree": {
+      "maxLength": 1000,
+      "minLength": 1,
+      "title": "Worktree",
+      "type": "string"
+    },
+    "allowed_paths": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 500,
+      "title": "Allowed Paths",
+      "type": "array"
+    },
+    "read_only": {
+      "default": false,
+      "title": "Read Only",
+      "type": "boolean"
+    },
+    "acceptance_criteria": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100,
+      "minItems": 1,
+      "title": "Acceptance Criteria",
+      "type": "array"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_id",
+    "project_id",
+    "objective",
+    "actor",
+    "repository",
+    "branch",
+    "worktree",
+    "acceptance_criteria"
+  ],
+  "title": "TaskEnvelope",
+  "type": "object"
+}

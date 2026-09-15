@@ -1,0 +1,105 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "promotion_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Promotion Id",
+      "type": "string"
+    },
+    "candidate_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Candidate Id",
+      "type": "string"
+    },
+    "organization_id": {
+      "default": "default",
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Organization Id",
+      "type": "string"
+    },
+    "project_id": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Project Id",
+      "type": "string"
+    },
+    "target": {
+      "const": "utopia",
+      "default": "utopia",
+      "title": "Target",
+      "type": "string"
+    },
+    "visibility": {
+      "default": "project",
+      "enum": [
+        "private",
+        "project",
+        "shared"
+      ],
+      "title": "Visibility",
+      "type": "string"
+    },
+    "validations": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100,
+      "minItems": 1,
+      "title": "Validations",
+      "type": "array"
+    },
+    "conflicts": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100,
+      "title": "Conflicts",
+      "type": "array"
+    },
+    "approved_by": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Approved By"
+    },
+    "status": {
+      "default": "pending",
+      "enum": [
+        "pending",
+        "approved",
+        "rejected"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "promotion_id",
+    "candidate_id",
+    "project_id",
+    "validations"
+  ],
+  "title": "PromotionRequest",
+  "type": "object"
+}

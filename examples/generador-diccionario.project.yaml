@@ -1,0 +1,18 @@
+schema_version: "1.0"
+project_id: generador-diccionario-entidades
+organization_id: arquitectura
+repository: https://github.com/gamurigm/generador_diccionario_entidades.git
+default_branch: main
+capabilities:
+  - java_extraction
+  - oracle_audit
+  - dashboard
+  - docker_deployment
+commands:
+  tests: .venv/Scripts/python.exe -m unittest discover -s tests -v
+  frontend_build: npm.cmd --prefix frontend run build
+policies:
+  repositories_read_only: true
+  allow_external_writes: false
+  require_human_approval_for_publish: true
+  allow_cross_project_context: false

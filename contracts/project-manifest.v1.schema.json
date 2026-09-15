@@ -1,0 +1,92 @@
+{
+  "$defs": {
+    "ProjectPolicies": {
+      "additionalProperties": false,
+      "properties": {
+        "repositories_read_only": {
+          "default": true,
+          "title": "Repositories Read Only",
+          "type": "boolean"
+        },
+        "allow_external_writes": {
+          "default": false,
+          "title": "Allow External Writes",
+          "type": "boolean"
+        },
+        "require_human_approval_for_publish": {
+          "default": true,
+          "title": "Require Human Approval For Publish",
+          "type": "boolean"
+        },
+        "allow_cross_project_context": {
+          "default": false,
+          "title": "Allow Cross Project Context",
+          "type": "boolean"
+        }
+      },
+      "title": "ProjectPolicies",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "project_id": {
+      "maxLength": 100,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$",
+      "title": "Project Id",
+      "type": "string"
+    },
+    "organization_id": {
+      "default": "default",
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Organization Id",
+      "type": "string"
+    },
+    "repository": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Repository",
+      "type": "string"
+    },
+    "default_branch": {
+      "default": "main",
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Default Branch",
+      "type": "string"
+    },
+    "capabilities": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100,
+      "title": "Capabilities",
+      "type": "array"
+    },
+    "commands": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "maxProperties": 50,
+      "title": "Commands",
+      "type": "object"
+    },
+    "policies": {
+      "$ref": "#/$defs/ProjectPolicies"
+    }
+  },
+  "required": [
+    "project_id",
+    "repository"
+  ],
+  "title": "ProjectManifest",
+  "type": "object"
+}
