@@ -1,3 +1,6 @@
+from pathlib import Path
+from threading import Event, Lock
+
 import pytest
 
 from trama_platform.contracts import (
@@ -8,11 +11,73 @@ from trama_platform.contracts import (
     PromotionRequest,
     TaskEnvelope,
 )
+from trama_platform.queueing import QueueCapacityError
 from trama_platform.runtime import TramaRuntime
+from trama_platform.state_store import SqliteStateStore
 
 
 def manifest(project_id: str = "demo") -> ProjectManifest:
     return ProjectManifest(project_id=project_id, repository="https://example.test/repo")
+
+
+def scoped_manifest() -> ProjectManifest:
+    return ProjectManifest(project_id="demo", organization_id="org-a", repository="repo-a")
+
+
+def task(task_id: str = "task-1") -> TaskEnvelope:
+    return TaskEnvelope(
+        task_id=task_id,
+        organization_id="org-a",
+        project_id="demo",
+        objective="Run tests",
+        actor="codex",
+        repository="repo-a",
+        branch="main",
+        worktree="C:/work/demo",
+        acceptance_criteria=["tests pass"],
+    )
+
+
+class RecordingCoordination:
+    def __init__(self) -> None:
+        self.seen: list[str] = []
+
+    def submit_task(self, item: TaskEnvelope) -> str:
+        self.seen.append(item.task_id)
+        return item.task_id
+
+    def record_result(self, result: AgentResult) -> None:
+        return None
+
+
+class BlockingCoordination(RecordingCoordination):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = Event()
+        self.release = Event()
+        self._lock = Lock()
+        self.active = 0
+
+    def submit_task(self, item: TaskEnvelope) -> str:
+        with self._lock:
+            self.active += 1
+        self.started.set()
+        self.release.wait(timeout=2)
+        with self._lock:
+            self.active -= 1
+        return super().submit_task(item)
+
+
+def runtime_with_blocking_coordination(
+    *, queue_capacity: int, max_concurrency: int
+) -> tuple[TramaRuntime, BlockingCoordination]:
+    coordination = BlockingCoordination()
+    runtime = TramaRuntime(
+        coordination=coordination,
+        queue_capacity=queue_capacity,
+        max_concurrency=max_concurrency,
+    )
+    return runtime, coordination
 
 
 def test_runtime_keeps_projects_and_tasks_in_their_contract_boundary():
@@ -178,3 +243,120 @@ def test_runtime_can_cancel_and_retry_a_task():
 
     assert runtime.cancel_task("task-lifecycle").state == "cancelled"
     assert runtime.retry_task("task-lifecycle").state == "accepted"
+
+
+def test_runtime_persists_task_before_dispatch(tmp_path: Path):
+    coordination = RecordingCoordination()
+    store = SqliteStateStore(tmp_path / "trama.db")
+    runtime = TramaRuntime(
+        coordination=coordination,
+        state_store=store,
+        queue_capacity=1,
+        max_concurrency=1,
+    )
+    try:
+        runtime.register_project(scoped_manifest())
+        assert runtime.submit_task(task()) == "task-1"
+        assert runtime.wait_for_idle(timeout=2)
+        assert coordination.seen == ["task-1"]
+        assert [item.task_id for item in store.load_tasks()] == ["task-1"]
+    finally:
+        runtime.close()
+
+
+def test_runtime_does_not_mutate_state_when_capacity_is_exhausted():
+    runtime, coordination = runtime_with_blocking_coordination(
+        queue_capacity=1,
+        max_concurrency=1,
+    )
+    try:
+        runtime.register_project(scoped_manifest())
+        runtime.submit_task(task("task-1"))
+        assert coordination.started.wait(timeout=2)
+        runtime.submit_task(task("task-2"))
+        with pytest.raises(QueueCapacityError):
+            runtime.submit_task(task("task-3"))
+        assert "task-3" not in runtime.tasks
+    finally:
+        coordination.release.set()
+        runtime.close()
+
+
+def test_runtime_records_dispatch_failure_as_terminal_state_and_event():
+    class BrokenCoordination(RecordingCoordination):
+        def submit_task(self, item: TaskEnvelope) -> str:
+            raise RuntimeError("coordinator unavailable")
+
+    runtime = TramaRuntime(coordination=BrokenCoordination())
+    try:
+        runtime.register_project(scoped_manifest())
+        runtime.submit_task(task())
+        assert runtime.wait_for_idle(timeout=2)
+        assert runtime.tasks["task-1"].state == "failed"
+        assert runtime.list_events()[-1].action == "task.dispatch"
+    finally:
+        runtime.close()
+
+
+def test_runtime_does_not_enqueue_an_identical_task_twice():
+    coordination = RecordingCoordination()
+    runtime = TramaRuntime(coordination=coordination)
+    try:
+        runtime.register_project(scoped_manifest())
+        item = task()
+        assert runtime.submit_task(item) == "task-1"
+        assert runtime.submit_task(item) == "task-1"
+        assert runtime.wait_for_idle(timeout=2)
+        assert coordination.seen == ["task-1"]
+        assert [event.action for event in runtime.list_events()].count("task.submit") == 1
+    finally:
+        runtime.close()
+
+
+def test_cancelled_queued_task_is_not_dispatched():
+    runtime, coordination = runtime_with_blocking_coordination(
+        queue_capacity=1,
+        max_concurrency=1,
+    )
+    try:
+        runtime.register_project(scoped_manifest())
+        runtime.submit_task(task("task-1"))
+        assert coordination.started.wait(timeout=2)
+        runtime.submit_task(task("task-2"))
+        assert runtime.cancel_task("task-2").state == "cancelled"
+        coordination.release.set()
+        assert runtime.wait_for_idle(timeout=2)
+        assert coordination.seen == ["task-1"]
+    finally:
+        coordination.release.set()
+        runtime.close()
+
+
+def test_runtime_recovers_running_task_as_accepted(tmp_path: Path):
+    store = SqliteStateStore(tmp_path / "trama.db")
+    first_coordination = RecordingCoordination()
+    first = TramaRuntime(
+        coordination=first_coordination,
+        state_store=store,
+        queue_capacity=1,
+        max_concurrency=1,
+    )
+    first.register_project(scoped_manifest())
+    first.submit_task(task())
+    assert first.wait_for_idle(timeout=2)
+    assert first.tasks["task-1"].state == "running"
+    first.close()
+
+    second_coordination = RecordingCoordination()
+    second = TramaRuntime(
+        coordination=second_coordination,
+        state_store=SqliteStateStore(tmp_path / "trama.db"),
+        queue_capacity=1,
+        max_concurrency=1,
+    )
+    try:
+        assert second.wait_for_idle(timeout=2)
+        assert second.tasks["task-1"].state == "running"
+        assert second_coordination.seen == ["task-1"]
+    finally:
+        second.close()

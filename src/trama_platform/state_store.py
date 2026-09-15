@@ -106,6 +106,30 @@ class SqliteStateStore:
     def load_tasks(self) -> list[TaskEnvelope]:
         return self._load_models("task", TaskEnvelope)
 
+    def save_task_transition(self, task: TaskEnvelope, event: OperationEvent) -> None:
+        task_payload = json.dumps(task.model_dump(mode="json"), ensure_ascii=False)
+        event_payload = json.dumps(event.model_dump(mode="json"), ensure_ascii=False)
+        with self._connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO state_records(kind, record_id, payload)
+                VALUES (?, ?, ?)
+                ON CONFLICT(kind, record_id) DO UPDATE SET payload = excluded.payload
+                """,
+                ("task", task.task_id, task_payload),
+            )
+            connection.execute(
+                """
+                INSERT INTO operation_events(event_id, created_at, payload)
+                VALUES (?, ?, ?)
+                """,
+                (
+                    event.event_id,
+                    event.created_at.isoformat(),
+                    event_payload,
+                ),
+            )
+
     def save_result(self, result: AgentResult) -> None:
         self._save_model("result", result.task_id, result)
 

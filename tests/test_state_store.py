@@ -4,6 +4,7 @@ from trama_platform.contracts import (
     AgentResult,
     Evidence,
     MemoryCandidate,
+    OperationEvent,
     ProjectManifest,
     TaskEnvelope,
 )
@@ -66,3 +67,20 @@ def test_runtime_records_auditable_events_in_sqlite(tmp_path: Path):
     assert [event.action for event in events] == ["project.register", "task.submit"]
     assert events[-1].project_id == "demo"
     assert events[-1].status == "accepted"
+
+
+def test_sqlite_store_saves_task_transition_with_its_event(tmp_path: Path):
+    store = SqliteStateStore(tmp_path / "trama.db")
+    task = _task().model_copy(update={"state": "running"})
+    event = OperationEvent(
+        action="task.dispatch",
+        status="accepted",
+        organization_id="org-a",
+        project_id="demo",
+        details={"task_id": task.task_id},
+    )
+
+    store.save_task_transition(task, event)
+
+    assert store.load_tasks() == [task]
+    assert store.list_events() == [event]

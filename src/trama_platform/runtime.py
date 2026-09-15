@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from threading import RLock
 
 from .contracts import (
     AgentResult,
@@ -14,6 +15,7 @@ from .contracts import (
 )
 from .namespaces import can_promote, can_read_candidate
 from .ports import CanonicalKnowledgePort, ContextMemoryPort, CoordinationPort, StateStorePort
+from .queueing import TaskDispatcher
 
 
 @dataclass
@@ -97,6 +99,9 @@ class TramaRuntime:
         context_memory: ContextMemoryPort | None = None,
         canonical_knowledge: CanonicalKnowledgePort | None = None,
         state_store: StateStorePort | None = None,
+        queue_capacity: int = 100,
+        max_concurrency: int = 4,
+        dispatch_timeout_seconds: int = 900,
     ) -> None:
         self.coordination = coordination or InMemoryCoordination()
         self.context_memory = context_memory or InMemoryContextMemory()
@@ -105,6 +110,7 @@ class TramaRuntime:
         self.projects = ProjectRegistry()
         self.tasks: dict[str, TaskEnvelope] = {}
         self._events: list[OperationEvent] = []
+        self._task_lock = RLock()
 
         if self.state_store is not None:
             self.projects.projects.update(
@@ -131,6 +137,27 @@ class TramaRuntime:
                     }
                 )
 
+        recovered_tasks: list[TaskEnvelope] = []
+        for task in self.tasks.values():
+            if task.state == "running":
+                normalized = task.model_copy(update={"state": "accepted"})
+                self.tasks[task.task_id] = normalized
+                if self.state_store is not None:
+                    self.state_store.save_task(normalized)
+                recovered_tasks.append(normalized)
+            elif task.state == "accepted":
+                recovered_tasks.append(task)
+
+        self.dispatcher = TaskDispatcher(
+            self.coordination,
+            queue_capacity=queue_capacity,
+            max_concurrency=max_concurrency,
+            dispatch_timeout_seconds=dispatch_timeout_seconds,
+            transition=self._transition_task,
+            current_task=self.tasks.get,
+        )
+        self.dispatcher.recover(recovered_tasks)
+
     def _record_event(
         self,
         *,
@@ -153,6 +180,48 @@ class TramaRuntime:
         else:
             self._events.append(event)
 
+    def _transition_task(
+        self,
+        task: TaskEnvelope,
+        action: str,
+        event_status: str,
+        details: dict[str, object],
+    ) -> None:
+        event = OperationEvent(
+            actor="trama",
+            action=action,
+            status=event_status,
+            organization_id=task.organization_id,
+            project_id=task.project_id,
+            details=details,
+        )
+        if self.state_store is not None:
+            self.state_store.save_task_transition(task, event)
+        else:
+            self._events.append(event)
+        with self._task_lock:
+            self.tasks[task.task_id] = task
+            if isinstance(self.coordination, InMemoryCoordination):
+                self.coordination.tasks[task.task_id] = task
+
+    def _persist_task_acceptance(self, task: TaskEnvelope) -> None:
+        event = OperationEvent(
+            actor="trama",
+            action="task.submit",
+            status="accepted",
+            organization_id=task.organization_id,
+            project_id=task.project_id,
+            details={"task_id": task.task_id},
+        )
+        if self.state_store is not None:
+            self.state_store.save_task_transition(task, event)
+        else:
+            self._events.append(event)
+        with self._task_lock:
+            self.tasks[task.task_id] = task
+            if isinstance(self.coordination, InMemoryCoordination):
+                self.coordination.tasks[task.task_id] = task
+
     def register_project(self, manifest: ProjectManifest) -> ProjectManifest:
         project = self.projects.register(manifest)
         if self.state_store is not None:
@@ -171,21 +240,21 @@ class TramaRuntime:
             raise ValueError("La organizacion de la tarea no coincide con el proyecto")
         if task.repository != project.repository:
             raise ValueError("El repositorio de la tarea no coincide con el proyecto")
-        existing = self.tasks.get(task.task_id)
-        if existing and existing.model_dump(mode="json") != task.model_dump(mode="json"):
-            raise ValueError(f"La tarea {task.task_id} ya existe con otra configuracion")
-        self.tasks[task.task_id] = task
-        task_id = self.coordination.submit_task(task)
-        if self.state_store is not None:
-            self.state_store.save_task(task)
-        self._record_event(
-            action="task.submit",
-            status="accepted",
-            organization_id=task.organization_id,
-            project_id=task.project_id,
-            details={"task_id": task.task_id},
+        with self._task_lock:
+            existing = self.tasks.get(task.task_id)
+            if existing:
+                existing_data = existing.model_dump(mode="json")
+                incoming_data = task.model_dump(mode="json")
+                for data in (existing_data, incoming_data):
+                    data.pop("state", None)
+                    data.pop("created_at", None)
+                if existing_data != incoming_data:
+                    raise ValueError(f"La tarea {task.task_id} ya existe con otra configuracion")
+                return task.task_id
+        return self.dispatcher.submit(
+            task,
+            persist=lambda: self._persist_task_acceptance(task),
         )
-        return task_id
 
     def record_result(self, result: AgentResult) -> None:
         if result.task_id not in self.tasks:
@@ -291,17 +360,14 @@ class TramaRuntime:
         if task.state not in {"failed", "partial", "blocked", "cancelled"}:
             raise ValueError(f"La tarea {task_id} no se puede reintentar desde {task.state}")
         updated = task.model_copy(update={"state": "accepted"})
-        self.tasks[task_id] = updated
-        if isinstance(self.coordination, InMemoryCoordination):
-            self.coordination.tasks[task_id] = updated
-        if self.state_store is not None:
-            self.state_store.save_task(updated)
-        self._record_event(
-            action="task.retry",
-            status="accepted",
-            organization_id=updated.organization_id,
-            project_id=updated.project_id,
-            details={"task_id": task_id},
+        self.dispatcher.submit(
+            updated,
+            persist=lambda: self._transition_task(
+                updated,
+                "task.retry",
+                "accepted",
+                {"task_id": task_id},
+            ),
         )
         return updated
 
@@ -361,4 +427,11 @@ class TramaRuntime:
             "coordination": type(self.coordination).__name__,
             "memory_candidates": candidates,
             "events": events,
+            **self.dispatcher.status(),
         }
+
+    def wait_for_idle(self, timeout: float) -> bool:
+        return self.dispatcher.wait_for_idle(timeout)
+
+    def close(self) -> None:
+        self.dispatcher.close()
