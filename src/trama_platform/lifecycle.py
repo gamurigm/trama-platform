@@ -21,6 +21,33 @@ def _terminate(pid: int) -> None:
     os.kill(pid, signal.SIGTERM)
 
 
+def _command_line(pid: int) -> str:
+    if os.name == "nt":
+        completed = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                f"(Get-CimInstance Win32_Process -Filter 'ProcessId = {pid}').CommandLine",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        return completed.stdout.strip()
+    try:
+        return Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\x00", b" ").decode()
+    except (FileNotFoundError, OSError, UnicodeDecodeError):
+        return ""
+
+
+def _owns_command(pid: int, command: Sequence[str]) -> bool:
+    line = _command_line(pid).casefold()
+    return bool(line) and all(part.casefold() in line for part in command[1:])
+
+
 class GatewaySupervisor:
     """Inicia y detiene únicamente el proceso registrado por TRAMA."""
 
@@ -31,12 +58,14 @@ class GatewaySupervisor:
         command: Sequence[str] = (),
         popen_factory: Callable[..., subprocess.Popen[str]] = subprocess.Popen,
         is_running: Callable[[int], bool] = _is_running,
+        is_owned: Callable[[int], bool] | None = None,
         terminate: Callable[[int], None] = _terminate,
     ) -> None:
         self.state_dir = Path(state_dir)
         self.command = list(command)
         self.popen_factory = popen_factory
         self.is_running = is_running
+        self.is_owned = is_owned or (lambda pid: _owns_command(pid, self.command))
         self.terminate = terminate
 
     @property
@@ -59,6 +88,8 @@ class GatewaySupervisor:
     def status(self) -> dict[str, int | str]:
         pid = self._read_pid()
         if pid is not None and self.is_running(pid):
+            if not self.is_owned(pid):
+                return {"status": "foreign_process", "pid": pid}
             return {"status": "running", "pid": pid}
         if pid is not None:
             self._clear_pid()
@@ -89,8 +120,11 @@ class GatewaySupervisor:
         if pid is None:
             return {"status": "not_running"}
         if self.is_running(pid):
-            self.terminate(pid)
-            result: dict[str, int | str] = {"status": "stopped", "pid": pid}
+            if self.is_owned(pid):
+                self.terminate(pid)
+                result: dict[str, int | str] = {"status": "stopped", "pid": pid}
+            else:
+                result = {"status": "foreign_process", "pid": pid}
         else:
             result = {"status": "stale_pid", "pid": pid}
         self._clear_pid()
