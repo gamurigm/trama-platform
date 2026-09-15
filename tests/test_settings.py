@@ -80,12 +80,23 @@ def test_settings_loads_native_service_values_from_environment(monkeypatch):
     assert settings.utopia_mcp_url == "https://127.0.0.1:1517/api/v1/kbs/local/mcp"
 
 
+def test_settings_uses_exact_olmoe_colibri_default(monkeypatch):
+    monkeypatch.delenv("TRAMA_COLIBRI_MODEL", raising=False)
+
+    settings = TramaSettings.from_env()
+
+    assert settings.colibri_model == "OLMoE-1B-7B-0125-Instruct"
+
+
 @pytest.mark.parametrize(
     "name,value",
     [
         ("TRAMA_OLLAMA_URL", "127.0.0.1:11434"),
         ("TRAMA_COLIBRI_URL", "ftp://127.0.0.1:8020"),
         ("TRAMA_UTOPIA_MCP_URL", "http://"),
+        ("TRAMA_OLLAMA_URL", "http://user:password@127.0.0.1:11434"),
+        ("TRAMA_COLIBRI_URL", "http://127.0.0.1:8020/path?token=secret"),
+        ("TRAMA_UTOPIA_URL", "http://127.0.0.1:1516/path#fragment"),
     ],
 )
 def test_settings_rejects_non_http_service_urls(monkeypatch, name, value):

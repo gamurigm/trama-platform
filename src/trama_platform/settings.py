@@ -42,7 +42,15 @@ def _read_url(name: str, default: str, *, allow_empty: bool = False) -> str:
     if allow_empty and not value:
         return ""
     parsed = urlparse(value)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc or not parsed.hostname:
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
         raise ValueError(f"{name} debe ser una URL HTTP(S) con host")
     return value
 
@@ -77,7 +85,7 @@ class TramaSettings:
     ollama_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen3:8b"
     colibri_url: str = "http://127.0.0.1:8020"
-    colibri_model: str = "olmoe-1b-7b-0125-instruct"
+    colibri_model: str = "OLMoE-1B-7B-0125-Instruct"
     colibri_executable: str = "coli"
     semantica_enabled: bool = False
     semantica_executable: str = "semantica-mcp"
@@ -115,7 +123,7 @@ class TramaSettings:
             ollama_model=os.getenv("TRAMA_OLLAMA_MODEL", "qwen3:8b"),
             colibri_url=_read_url("TRAMA_COLIBRI_URL", "http://127.0.0.1:8020"),
             colibri_model=os.getenv(
-                "TRAMA_COLIBRI_MODEL", "olmoe-1b-7b-0125-instruct"
+                "TRAMA_COLIBRI_MODEL", "OLMoE-1B-7B-0125-Instruct"
             ),
             colibri_executable=os.getenv("TRAMA_COLIBRI_EXECUTABLE", "coli"),
             semantica_enabled=_read_bool("TRAMA_SEMANTICA_ENABLED", False),
