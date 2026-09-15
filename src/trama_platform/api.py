@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
 
-from .contracts import AgentResult, MemoryCandidate, ProjectManifest, PromotionRequest, TaskEnvelope
+from .contracts import (
+    AgentResult,
+    MemoryCandidate,
+    MemorySearchRequest,
+    ProjectManifest,
+    PromotionRequest,
+    TaskEnvelope,
+)
 from .runtime import TramaRuntime
 
 
@@ -43,6 +50,17 @@ def create_app(runtime: TramaRuntime | None = None) -> FastAPI:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {"candidate_id": candidate_id, "status": "stored"}
+
+    @app.post("/v1/memory/search", response_model=list[MemoryCandidate])
+    def search_memory(request: MemorySearchRequest) -> list[MemoryCandidate]:
+        try:
+            return app.state.runtime.search_memory(
+                request.organization_id, request.project_id, request.query
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.post("/v1/knowledge/promotions", status_code=201)
     def promote(request: PromotionRequest) -> dict[str, str]:

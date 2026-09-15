@@ -10,3 +10,7 @@ se exportan como JSON Schema versionado mediante:
 Los esquemas generados son artefactos públicos de interoperabilidad. Las
 implementaciones de CCCC, Semantica, Utopia, MCP y Model Gateway no forman
 parte de estos contratos.
+
+El puente MCP usa estos contratos para validar antes de llamar a la API. La
+herramienta de memoria solo crea `MemoryCandidate`; la promoción a conocimiento
+canónico permanece fuera del conjunto de herramientas Hermes.

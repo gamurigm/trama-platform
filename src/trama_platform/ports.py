@@ -28,7 +28,9 @@ class ContextMemoryPort(Protocol):
 
     def get_candidate(self, candidate_id: str) -> MemoryCandidate | None: ...
 
-    def search(self, project_id: str, query: str) -> Sequence[MemoryCandidate]: ...
+    def search(
+        self, organization_id: str, project_id: str, query: str
+    ) -> Sequence[MemoryCandidate]: ...
 
 
 class CanonicalKnowledgePort(Protocol):

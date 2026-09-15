@@ -13,6 +13,7 @@ reglas de seguridad.
 - **Orquestador TRAMA:** planifica, delega y supervisa.
 - **CCCC:** coordina tareas, actores, estados, mensajes y handoffs.
 - **Agentes:** Codex, OpenCode y otros ejecutores especializados.
+- **Hermes Agent:** interfaz local supervisada conectada mediante MCP `stdio`.
 - **Colibri:** memoria rápida/local del agente.
 - **Semantica:** memoria contextual y episódica mediante un adaptador externo.
 - **Utopia:** conocimiento persistente y canónico mediante un adaptador externo.
@@ -40,6 +41,18 @@ Iniciar la API local:
 .\.venv\Scripts\python.exe -m trama_platform api --host 127.0.0.1 --port 8090
 ```
 
+En otra terminal, desde la raíz del repositorio, iniciar el servidor MCP que
+Hermes consumirá:
+
+```powershell
+.\.venv\Scripts\python.exe -m trama_platform mcp --api-url http://127.0.0.1:8090
+```
+
+La plantilla [examples/hermes-config.yaml](examples/hermes-config.yaml) se
+puede copiar a `%USERPROFILE%\.hermes\config.yaml`. Hermes debe ejecutarse
+desde la raíz del repositorio para que `uv` resuelva este proyecto. El perfil
+habilita solo las herramientas TRAMA y mantiene las aprobaciones manuales.
+
 También puede iniciarse con Docker:
 
 ```powershell
@@ -60,6 +73,9 @@ El valor predeterminado mantiene la validación TLS normal.
 La API inicial usa almacenamiento en memoria para validar contratos y flujos.
 La persistencia productiva se conectará mediante los puertos de memoria y
 conocimiento, sin introducir SQLite como dependencia compartida.
+
+El proceso MCP no mantiene estado de negocio propio: reenvía sus operaciones a
+la API HTTP local. Reiniciar la API reinicia el estado de esta fase inicial.
 
 ## Registrar un proyecto
 
@@ -83,6 +99,7 @@ validación. Los esquemas JSON se pueden exportar con:
 
 Esta primera base implementa contratos, namespaces, registro de proyectos,
 runtime local, API y adaptador CCCC. Semantica, Utopia, MCP y Model Gateway
-quedan desacoplados detrás de puertos explícitos. Ningún fallo de un adaptador
+quedan desacoplados detrás de puertos explícitos; el puente MCP para Hermes
+reenvía las operaciones a la API. Ningún fallo de un adaptador
 externo debe impedir que un proyecto ejecute sus pruebas o genere sus propios
 artefactos.

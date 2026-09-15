@@ -1,0 +1,30 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "organization_id": {
+      "default": "default",
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Organization Id",
+      "type": "string"
+    },
+    "project_id": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Project Id",
+      "type": "string"
+    },
+    "query": {
+      "maxLength": 1000,
+      "minLength": 1,
+      "title": "Query",
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id",
+    "query"
+  ],
+  "title": "MemorySearchRequest",
+  "type": "object"
+}
