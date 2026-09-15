@@ -10,6 +10,7 @@ from .api import create_app
 from .contracts import (
     AgentResult,
     MemoryCandidate,
+    MemorySearchRequest,
     ModelRequest,
     ProjectManifest,
     PromotionRequest,
@@ -25,6 +26,7 @@ CONTRACTS = {
     "task-envelope": TaskEnvelope,
     "agent-result": AgentResult,
     "memory-candidate": MemoryCandidate,
+    "memory-search-request": MemorySearchRequest,
     "promotion-request": PromotionRequest,
     "tool-invocation": ToolInvocation,
     "model-request": ModelRequest,
