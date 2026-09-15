@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from trama_platform.api import create_app
 from trama_platform.queueing import QueueCapacityError
 from trama_platform.runtime import TramaRuntime
+from trama_platform.settings import TramaSettings
 from trama_platform.state_store import SqliteStateStore
 
 
@@ -107,6 +108,37 @@ def test_api_exposes_control_plane_status_projects_tasks_and_events(tmp_path):
         "task.submit",
         "task.dispatch",
     ]
+
+
+def test_api_exposes_the_native_service_catalog(monkeypatch):
+    settings = TramaSettings(api_url="http://trama.test:8090")
+    expected = {
+        "status": "unavailable",
+        "services": [
+            {
+                "id": "ollama",
+                "status": "unavailable",
+                "kind": "http",
+                "message": "endpoint no disponible",
+            }
+        ],
+    }
+    observed = []
+
+    def fake_collect_service_status(received_settings):
+        observed.append(received_settings)
+        return expected
+
+    monkeypatch.setattr(
+        "trama_platform.api.collect_service_status", fake_collect_service_status
+    )
+    client = TestClient(create_app(TramaRuntime(), settings=settings))
+
+    response = client.get("/v1/services")
+
+    assert response.status_code == 200
+    assert response.json() == expected
+    assert observed == [settings]
 
 
 def test_api_status_counts_results_with_external_coordination(tmp_path):

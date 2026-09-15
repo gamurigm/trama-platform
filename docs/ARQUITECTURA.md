@@ -10,7 +10,7 @@ pruebas, secretos y ciclo de despliegue.
 Usuario
   |
   v
-trama CLI / TUI
+trama CLI gateway / TUI
   |
   v
 TRAMA Control Plane + API local
@@ -23,17 +23,19 @@ TRAMA Control Plane + API local
   |
   +--> Codex / OpenCode / otros agentes
   |
+  +--> GET /v1/services: catálogo read-only
+  |
   +--> Hermes local -- MCP stdio --> TRAMA API
   |
+  +--> Hermes -- MCP stdio --> Semantica
+  |
+  +--> Hermes -- MCP HTTP --> Utopia
+  |
+  +--> Hermes -- OpenAI-compatible --> Ollama: Qwen3 8B, tool-calling
+  |
+  +--> Hermes -- OpenAI-compatible --> Colibri: OLMoE 7B, análisis local
+  |
   +--> MCP: herramientas y servicios
-  |
-  +--> Model Gateway: proveedores de modelos
-  |
-  +--> Colibri: memoria local rápida
-  |
-  +--> Semantica: contexto y memoria episódica
-              |
-              +--> promoción validada --> Utopia: conocimiento canónico
 ```
 
 ## Aislamiento
@@ -57,7 +59,16 @@ Hermes es un proceso externo supervisado de TRAMA. Puede consultar contexto,
 enviar tareas, registrar resultados y capturar candidatos con evidencia a
 través de MCP `stdio`. Su TUI de conversación, modelos, skills y memoria
 propia no se duplican en TRAMA. No publica conocimiento canónico y no
-sustituye a CCCC para coordinar actores.
+sustituye a CCCC para coordinar actores. El perfil nativo añade directamente
+los MCP de Semantica y Utopia y los proveedores OpenAI-compatible de Ollama y
+Colibri. Qwen3 es el modelo primario para llamadas a herramientas; OLMoE se
+reserva para análisis local porque Colibri no lo declara compatible con
+tool-calling nativo.
+
+El catálogo `GET /v1/services` y `trama services status --json` solo hacen
+comprobaciones de salud y presencia del modelo configurado. No lanzan procesos,
+no leen tokens y no exponen URLs con credenciales. La caída de un servicio
+opcional se reporta como `unavailable`.
 
 La TUI de TRAMA consume los mismos servicios que la CLI: estado, proyectos,
 tareas, agentes derivados, eventos de auditoría y candidatos visibles. No crea
@@ -73,6 +84,8 @@ compartido en esta fase.
 
 - La ausencia de Semantica no detiene una tarea.
 - La ausencia de Utopia no invalida una evidencia local.
+- La ausencia de Ollama o Colibri no detiene TRAMA; solo impide usar ese perfil
+  de modelo.
 - Un error de MCP se devuelve como resultado fallido de la herramienta.
 - Un error de Model Gateway se registra en el `AgentResult`.
 - Un conflicto de conocimiento bloquea la promoción canónica.

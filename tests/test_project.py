@@ -32,3 +32,21 @@ def test_hermes_template_uses_local_stdio_and_only_trama_tools():
     assert server["tools"]["prompts"] is False
     assert config["approvals"]["mode"] == "manual"
     assert "yolo" not in path.read_text(encoding="utf-8").casefold()
+
+
+def test_native_hermes_template_connects_the_three_mcp_services():
+    path = Path(__file__).parents[1] / "examples" / "hermes-native-config.yaml"
+    raw = path.read_text(encoding="utf-8")
+    config = yaml.safe_load(raw)
+
+    assert config["model"]["default"] == "qwen3:8b"
+    assert set(config["mcp_servers"]) == {"trama", "semantica", "utopia"}
+    assert config["mcp_servers"]["trama"]["tools"]["resources"] is False
+    assert config["mcp_servers"]["semantica"]["command"] == "semantica-mcp"
+    assert config["mcp_servers"]["utopia"]["url"].endswith(
+        "/api/v1/kbs/local/mcp"
+    )
+    assert "${UTOPIA_API_TOKEN}" in raw
+    assert "real-token" not in raw
+    assert "secret" not in raw.casefold()
+    assert "yolo" not in raw.casefold()
