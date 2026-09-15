@@ -1,3 +1,5 @@
+![TRAMA — coordinación de agentes, memoria y conocimiento](docs/banner-trama.png)
+
 # TRAMA
 
 TRAMA es un entorno independiente para coordinar agentes y conectar varios
