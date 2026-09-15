@@ -109,8 +109,10 @@ puede copiar a `%USERPROFILE%\.hermes\config.yaml`. Hermes debe ejecutarse
 desde la raíz del repositorio para que `uv` resuelva este proyecto. El perfil
 habilita solo las herramientas TRAMA y mantiene las aprobaciones manuales.
 Para activar también los servicios nativos usa `trama hermes configure --all`;
-el resultado incluye TRAMA, Semantica y Utopia, además de los proveedores locales
-de Ollama y Colibri. La plantilla completa está en
+el resultado agrega TRAMA y solo los servicios nativos configurados: Semantica
+cuando `TRAMA_SEMANTICA_ENABLED` está activo y Utopia cuando
+`TRAMA_UTOPIA_MCP_URL` tiene una URL. También incluye los proveedores locales de
+Ollama y Colibri. La plantilla completa está en
 [examples/hermes-native-config.yaml](examples/hermes-native-config.yaml).
 
 ## Servicios nativos y orden de arranque

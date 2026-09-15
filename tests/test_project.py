@@ -50,3 +50,13 @@ def test_native_hermes_template_connects_the_three_mcp_services():
     assert "real-token" not in raw
     assert "secret" not in raw.casefold()
     assert "yolo" not in raw.casefold()
+
+
+def test_readme_documents_only_configured_native_services():
+    path = Path(__file__).parents[1] / "README.md"
+    raw = path.read_text(encoding="utf-8")
+
+    assert "servicios nativos configurados" in raw
+    assert "TRAMA_SEMANTICA_ENABLED" in raw
+    assert "TRAMA_UTOPIA_MCP_URL" in raw
+    assert "el resultado incluye TRAMA, Semantica y Utopia" not in raw
