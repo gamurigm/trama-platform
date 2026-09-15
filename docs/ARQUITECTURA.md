@@ -15,6 +15,8 @@ trama CLI / TUI
   v
 TRAMA Control Plane + API local
   |
+  +--> Cola acotada local: backpressure y dispatch concurrente
+  |
   +--> SQLite local: estado, eventos y auditoria
   |
   +--> CCCC: tareas, actores, estados, mensajes y handoffs
@@ -60,6 +62,12 @@ sustituye a CCCC para coordinar actores.
 La TUI de TRAMA consume los mismos servicios que la CLI: estado, proyectos,
 tareas, agentes derivados, eventos de auditoría y candidatos visibles. No crea
 estado paralelo ni acciones que no existan en el gateway.
+
+La cola de tareas es acotada al proceso para proteger el control plane local:
+`TRAMA_QUEUE_CAPACITY` limita las tareas pendientes y
+`TRAMA_MAX_CONCURRENCY` los despachos simultáneos. Cuando se alcanza la
+capacidad admitida, la API responde `429 queue_full`; no se introduce un broker
+compartido en esta fase.
 
 ## Política de fallos
 

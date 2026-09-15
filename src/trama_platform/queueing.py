@@ -134,6 +134,7 @@ class TaskDispatcher:
                 self._reserve()
                 self.queue.put(task)
             except QueueCapacityError:
+                self._reservations.release()
                 return
             except Exception:
                 self._reservations.release()

@@ -17,6 +17,13 @@ def _read_int(name: str, default: int) -> int:
         raise ValueError(f"{name} debe ser un entero") from exc
 
 
+def _read_positive_int(name: str, default: int) -> int:
+    value = _read_int(name, default)
+    if value < 1:
+        raise ValueError(f"{name} debe ser mayor que cero")
+    return value
+
+
 def _default_hermes_config_path() -> str:
     hermes_home = os.getenv("HERMES_HOME")
     if hermes_home:
@@ -39,6 +46,9 @@ class TramaSettings:
     coordination_backend: str = "memory"
     cccc_executable: str = "cccc"
     cccc_timeout_seconds: int = 30
+    queue_capacity: int = 100
+    max_concurrency: int = 4
+    dispatch_timeout_seconds: int = 900
     hermes_executable: str = "hermes"
     hermes_config_path: str = "~/.hermes/config.yaml"
 
@@ -60,6 +70,11 @@ class TramaSettings:
             coordination_backend=os.getenv("TRAMA_COORDINATION_BACKEND", "memory"),
             cccc_executable=os.getenv("TRAMA_CCCC_EXECUTABLE", "cccc"),
             cccc_timeout_seconds=_read_int("TRAMA_CCCC_TIMEOUT_SECONDS", 30),
+            queue_capacity=_read_positive_int("TRAMA_QUEUE_CAPACITY", 100),
+            max_concurrency=_read_positive_int("TRAMA_MAX_CONCURRENCY", 4),
+            dispatch_timeout_seconds=_read_positive_int(
+                "TRAMA_DISPATCH_TIMEOUT_SECONDS", 900
+            ),
             hermes_executable=os.getenv("TRAMA_HERMES_EXECUTABLE", "hermes"),
             hermes_config_path=os.getenv(
                 "TRAMA_HERMES_CONFIG_PATH", _default_hermes_config_path()

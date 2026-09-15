@@ -1,6 +1,7 @@
 import importlib
 import json
 import sys
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -241,7 +242,39 @@ def test_cli_mcp_model_and_config_commands_are_explicit(monkeypatch, capsys):
 
     monkeypatch.setattr(sys, "argv", ["trama", "config", "get", "--json"])
     cli.main()
-    assert json.loads(capsys.readouterr().out)["api_host"] == "127.0.0.1"
+    config = json.loads(capsys.readouterr().out)
+    assert config["api_host"] == "127.0.0.1"
+    assert config["queue_capacity"] == 100
+    assert config["max_concurrency"] == 4
+    assert config["dispatch_timeout_seconds"] == 900
+
+
+def test_cli_api_passes_queue_settings_to_app(monkeypatch, tmp_path):
+    cli = importlib.import_module("trama_platform.cli")
+    captured = {}
+
+    monkeypatch.setenv("TRAMA_QUEUE_CAPACITY", "7")
+    monkeypatch.setenv("TRAMA_MAX_CONCURRENCY", "3")
+    monkeypatch.setenv("TRAMA_DISPATCH_TIMEOUT_SECONDS", "21")
+    monkeypatch.setenv("TRAMA_STATE_DIR", str(tmp_path))
+
+    def fake_create_app(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    def fake_run(app, **kwargs):
+        captured["uvicorn"] = kwargs
+
+    monkeypatch.setattr(cli, "create_app", fake_create_app)
+    monkeypatch.setitem(sys.modules, "uvicorn", SimpleNamespace(run=fake_run))
+    monkeypatch.setattr(sys, "argv", ["trama", "api"])
+
+    cli.main()
+
+    assert captured["settings"].queue_capacity == 7
+    assert captured["settings"].max_concurrency == 3
+    assert captured["settings"].dispatch_timeout_seconds == 21
+    assert captured["uvicorn"] == {"host": "127.0.0.1", "port": 8090}
 
 
 def test_cli_can_inspect_a_project_and_submit_a_task_file(monkeypatch, tmp_path, capsys):

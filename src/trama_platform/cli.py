@@ -309,6 +309,9 @@ def _run_control_command(args: argparse.Namespace) -> None:
             "coordination_backend": settings.coordination_backend,
             "cccc_executable": settings.cccc_executable,
             "cccc_timeout_seconds": settings.cccc_timeout_seconds,
+            "queue_capacity": settings.queue_capacity,
+            "max_concurrency": settings.max_concurrency,
+            "dispatch_timeout_seconds": settings.dispatch_timeout_seconds,
             "hermes_executable": settings.hermes_executable,
             "hermes_config_path": settings.hermes_config_path,
         }
@@ -363,6 +366,7 @@ def main() -> None:
             create_app(
                 coordination=build_coordination(settings),
                 state_store=state_store,
+                settings=settings,
             ),
             host=args.host,
             port=args.port,

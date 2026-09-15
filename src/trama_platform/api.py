@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, Query
 
 from .contracts import (
@@ -14,7 +16,9 @@ from .contracts import (
     TaskEnvelope,
 )
 from .ports import CoordinationPort, StateStorePort
+from .queueing import QueueCapacityError
 from .runtime import TramaRuntime
+from .settings import TramaSettings
 
 
 def create_app(
@@ -22,12 +26,25 @@ def create_app(
     *,
     coordination: CoordinationPort | None = None,
     state_store: StateStorePort | None = None,
+    settings: TramaSettings | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="TRAMA", version="0.1.0")
-    app.state.runtime = runtime or TramaRuntime(
+    runtime_instance = runtime or TramaRuntime(
         coordination=coordination,
         state_store=state_store,
+        queue_capacity=settings.queue_capacity if settings else 100,
+        max_concurrency=settings.max_concurrency if settings else 4,
+        dispatch_timeout_seconds=(
+            settings.dispatch_timeout_seconds if settings else 900
+        ),
     )
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        yield
+        runtime_instance.close()
+
+    app = FastAPI(title="TRAMA", version="0.1.0", lifespan=lifespan)
+    app.state.runtime = runtime_instance
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -79,6 +96,12 @@ def create_app(
     def retry_task(task_id: str) -> TaskEnvelope:
         try:
             return app.state.runtime.retry_task(task_id)
+        except QueueCapacityError as exc:
+            raise HTTPException(
+                status_code=429,
+                detail={"code": "queue_full", "message": "La cola de tareas está llena"},
+                headers={"Retry-After": "1"},
+            ) from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
@@ -92,6 +115,12 @@ def create_app(
     def submit_task(task: TaskEnvelope) -> dict[str, str]:
         try:
             task_id = app.state.runtime.submit_task(task)
+        except QueueCapacityError as exc:
+            raise HTTPException(
+                status_code=429,
+                detail={"code": "queue_full", "message": "La cola de tareas está llena"},
+                headers={"Retry-After": "1"},
+            ) from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:

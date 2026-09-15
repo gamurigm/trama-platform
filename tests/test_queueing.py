@@ -107,6 +107,36 @@ def test_dispatcher_releases_reservation_when_persistence_fails():
         dispatcher.close()
 
 
+def test_recovery_releases_reservation_when_queue_is_full():
+    class QueueThatFailsRecovery(BoundedTaskQueue):
+        failures = 2
+
+        def put(self, task: TaskEnvelope) -> None:
+            if self.failures:
+                self.failures -= 1
+                raise QueueCapacityError("recovery full")
+            super().put(task)
+
+    queue = QueueThatFailsRecovery(capacity=1)
+    coordination = RecordingCoordination()
+    dispatcher = TaskDispatcher(
+        coordination,
+        queue_capacity=1,
+        max_concurrency=1,
+        transition=lambda *args: None,
+        current_task=lambda task_id: make_task(task_id),
+        queue=queue,
+    )
+    try:
+        dispatcher.recover([make_task("recovery-1")])
+        dispatcher.recover([make_task("recovery-2")])
+        dispatcher.submit(make_task("task-1"), persist=lambda: None)
+        assert dispatcher.wait_for_idle(timeout=2)
+        assert coordination.seen == ["task-1"]
+    finally:
+        dispatcher.close()
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [

@@ -1,6 +1,9 @@
+from threading import Event
+
 from fastapi.testclient import TestClient
 
 from trama_platform.api import create_app
+from trama_platform.queueing import QueueCapacityError
 from trama_platform.runtime import TramaRuntime
 from trama_platform.state_store import SqliteStateStore
 
@@ -91,6 +94,7 @@ def test_api_exposes_control_plane_status_projects_tasks_and_events(tmp_path):
         "acceptance_criteria": ["tests pass"],
     }
     assert client.post("/v1/tasks", json=task).status_code == 202
+    assert runtime.wait_for_idle(timeout=2)
 
     status = client.get("/v1/status")
     assert status.status_code == 200
@@ -101,6 +105,7 @@ def test_api_exposes_control_plane_status_projects_tasks_and_events(tmp_path):
     assert [item["action"] for item in client.get("/v1/events").json()] == [
         "project.register",
         "task.submit",
+        "task.dispatch",
     ]
 
 
@@ -235,3 +240,92 @@ def test_api_can_cancel_and_retry_a_task():
 
     assert client.post("/v1/tasks/task-1/cancel").json()["state"] == "cancelled"
     assert client.post("/v1/tasks/task-1/retry").json()["state"] == "accepted"
+
+
+def test_api_returns_queue_full_and_dispatcher_metrics():
+    class BlockingCoordination:
+        def __init__(self):
+            self.started = Event()
+            self.release = Event()
+
+        def submit_task(self, task):
+            self.started.set()
+            self.release.wait(timeout=2)
+            return task.task_id
+
+        def record_result(self, result):
+            return None
+
+    coordination = BlockingCoordination()
+    runtime = TramaRuntime(
+        coordination=coordination,
+        queue_capacity=1,
+        max_concurrency=1,
+    )
+    client = TestClient(create_app(runtime))
+    project = {"project_id": "demo", "repository": "repo-a"}
+
+    def task_payload(task_id):
+        return {
+            "task_id": task_id,
+            "project_id": "demo",
+            "objective": "Run tests",
+            "actor": "codex",
+            "repository": "repo-a",
+            "branch": "main",
+            "worktree": "C:/work/demo",
+            "acceptance_criteria": ["tests pass"],
+        }
+
+    try:
+        assert client.post("/v1/projects", json=project).status_code == 201
+        assert client.post("/v1/tasks", json=task_payload("task-1")).status_code == 202
+        assert coordination.started.wait(timeout=2)
+        assert client.post("/v1/tasks", json=task_payload("task-2")).status_code == 202
+
+        response = client.post("/v1/tasks", json=task_payload("task-3"))
+
+        assert response.status_code == 429
+        assert response.headers["retry-after"] == "1"
+        assert response.json()["detail"] == {
+            "code": "queue_full",
+            "message": "La cola de tareas está llena",
+        }
+        assert "task-3" not in runtime.tasks
+        status = client.get("/v1/status").json()
+        assert status["queue_depth"] == 1
+        assert status["queue_capacity"] == 1
+        assert status["active_dispatches"] == 1
+        assert status["max_concurrency"] == 1
+        assert status["dispatcher_status"] == "running"
+    finally:
+        coordination.release.set()
+        runtime.close()
+
+
+def test_api_maps_queue_full_on_task_retry():
+    class FullRuntime:
+        def retry_task(self, task_id):
+            raise QueueCapacityError("full")
+
+    client = TestClient(create_app(FullRuntime()))
+
+    response = client.post("/v1/tasks/task-1/retry")
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "1"
+
+
+def test_api_closes_runtime_once_during_lifespan():
+    class ClosableRuntime:
+        def __init__(self):
+            self.close_calls = 0
+
+        def close(self):
+            self.close_calls += 1
+
+    runtime = ClosableRuntime()
+    with TestClient(create_app(runtime)):
+        pass
+
+    assert runtime.close_calls == 1

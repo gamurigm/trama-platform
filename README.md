@@ -124,7 +124,13 @@ Remove-Item Env:TRAMA_PIP_INSECURE
 El valor predeterminado mantiene la validación TLS normal.
 
 El control plane local persiste proyectos, tareas, resultados, candidatos,
-promociones y eventos en SQLite. Los puertos de contexto y conocimiento todavía
+promociones y eventos en SQLite. El dispatcher mantiene una cola acotada dentro
+del proceso: admite hasta `TRAMA_QUEUE_CAPACITY + TRAMA_MAX_CONCURRENCY` tareas,
+ejecuta como máximo `TRAMA_MAX_CONCURRENCY` despachos simultáneos y devuelve
+HTTP 429 con código `queue_full` cuando no puede admitir otra tarea. Esta cola
+no es un broker compartido entre procesos; configura sus límites con
+`TRAMA_QUEUE_CAPACITY`, `TRAMA_MAX_CONCURRENCY` y
+`TRAMA_DISPATCH_TIMEOUT_SECONDS`. Los puertos de contexto y conocimiento todavía
 usan implementaciones locales por defecto; Semantica y Utopia se conectarán como
 adaptadores externos sin convertirlos en dependencias obligatorias de TRAMA.
 
