@@ -71,7 +71,9 @@ def test_runtime_rejects_task_from_another_organization():
 
 def test_runtime_searches_shared_memory_only_inside_the_organization():
     runtime = TramaRuntime()
-    runtime.register_project(ProjectManifest(project_id="demo", organization_id="org-a", repository="repo-a"))
+    runtime.register_project(
+        ProjectManifest(project_id="demo", organization_id="org-a", repository="repo-a")
+    )
     runtime.register_project(
         ProjectManifest(project_id="other", organization_id="org-b", repository="repo-b")
     )

@@ -11,6 +11,7 @@ from .contracts import (
     TaskEnvelope,
     ToolInvocation,
 )
+from .mcp_server import TramaApiClient, create_mcp_server
 from .runtime import TramaRuntime
 
 __all__ = [
@@ -24,4 +25,6 @@ __all__ = [
     "TaskEnvelope",
     "ToolInvocation",
     "TramaRuntime",
+    "TramaApiClient",
+    "create_mcp_server",
 ]
