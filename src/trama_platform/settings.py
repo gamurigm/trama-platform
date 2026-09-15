@@ -25,6 +25,7 @@ class TramaSettings:
     api_host: str = "127.0.0.1"
     api_port: int = 8090
     api_url: str = "http://127.0.0.1:8090"
+    coordination_backend: str = "memory"
     cccc_executable: str = "cccc"
     cccc_timeout_seconds: int = 30
     hermes_executable: str = "hermes"
@@ -45,6 +46,7 @@ class TramaSettings:
             api_host=api_host,
             api_port=api_port,
             api_url=os.getenv("TRAMA_API_URL", f"http://{api_host}:{api_port}"),
+            coordination_backend=os.getenv("TRAMA_COORDINATION_BACKEND", "memory"),
             cccc_executable=os.getenv("TRAMA_CCCC_EXECUTABLE", "cccc"),
             cccc_timeout_seconds=_read_int("TRAMA_CCCC_TIMEOUT_SECONDS", 30),
             hermes_executable=os.getenv("TRAMA_HERMES_EXECUTABLE", "hermes"),

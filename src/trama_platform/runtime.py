@@ -346,16 +346,19 @@ class TramaRuntime:
     def status(self) -> dict[str, object]:
         if self.state_store is not None:
             candidates = self.state_store.count("candidate")
+            results = self.state_store.count("result")
             events = self.state_store.count_events()
         else:
             candidates = len(getattr(self.context_memory, "candidates", {}))
+            results = len(getattr(self.coordination, "results", {}))
             events = len(self._events)
         return {
             "service": "trama",
             "status": "ready",
             "projects": len(self.projects.projects),
             "tasks": len(self.tasks),
-            "results": len(getattr(self.coordination, "results", {})),
+            "results": results,
+            "coordination": type(self.coordination).__name__,
             "memory_candidates": candidates,
             "events": events,
         }

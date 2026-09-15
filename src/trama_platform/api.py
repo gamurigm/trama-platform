@@ -13,17 +13,21 @@ from .contracts import (
     PromotionRequest,
     TaskEnvelope,
 )
-from .ports import StateStorePort
+from .ports import CoordinationPort, StateStorePort
 from .runtime import TramaRuntime
 
 
 def create_app(
     runtime: TramaRuntime | None = None,
     *,
+    coordination: CoordinationPort | None = None,
     state_store: StateStorePort | None = None,
 ) -> FastAPI:
     app = FastAPI(title="TRAMA", version="0.1.0")
-    app.state.runtime = runtime or TramaRuntime(state_store=state_store)
+    app.state.runtime = runtime or TramaRuntime(
+        coordination=coordination,
+        state_store=state_store,
+    )
 
     @app.get("/health")
     def health() -> dict[str, str]:

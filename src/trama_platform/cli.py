@@ -8,6 +8,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import httpx
+
+from .adapters import CcccCliAdapter
 from .api import create_app
 from .contracts import (
     AgentResult,
@@ -23,6 +26,7 @@ from .contracts import (
 from .hermes import HermesAdapter
 from .lifecycle import GatewaySupervisor
 from .mcp_server import TramaApiClient, TramaApiError, run_mcp
+from .ports import CoordinationPort
 from .project import load_project_manifest
 from .settings import TramaSettings
 from .state_store import SqliteStateStore
@@ -62,6 +66,22 @@ def _emit(value: Any, *, as_json: bool) -> None:
         print(json.dumps(value, ensure_ascii=False, indent=2, default=str))
     else:
         print(value)
+
+
+def build_coordination(settings: TramaSettings) -> CoordinationPort | None:
+    """Construye el coordinador externo solicitado por configuración."""
+
+    backend = settings.coordination_backend.casefold()
+    if backend == "memory":
+        return None
+    if backend == "cccc":
+        return CcccCliAdapter(
+            executable=settings.cccc_executable,
+            timeout_seconds=settings.cccc_timeout_seconds,
+        )
+    raise ValueError(
+        "TRAMA_COORDINATION_BACKEND debe ser 'memory' o 'cccc'"
+    )
 
 
 def _add_api_options(parser: argparse.ArgumentParser, settings: TramaSettings) -> None:
@@ -190,7 +210,7 @@ def _run_control_command(args: argparse.Namespace) -> None:
     if args.command == "doctor":
         try:
             status = TramaApiClient(args.api_url).get_status()
-        except TramaApiError as exc:
+        except (TramaApiError, httpx.HTTPError) as exc:
             _emit(
                 {"status": "error", "code": "api_unavailable", "message": str(exc)},
                 as_json=args.as_json,
@@ -286,6 +306,7 @@ def _run_control_command(args: argparse.Namespace) -> None:
             "api_host": settings.api_host,
             "api_port": settings.api_port,
             "api_url": settings.api_url,
+            "coordination_backend": settings.coordination_backend,
             "cccc_executable": settings.cccc_executable,
             "cccc_timeout_seconds": settings.cccc_timeout_seconds,
             "hermes_executable": settings.hermes_executable,
@@ -339,7 +360,10 @@ def main() -> None:
 
         state_store = SqliteStateStore(settings.state_path)
         uvicorn.run(
-            create_app(state_store=state_store),
+            create_app(
+                coordination=build_coordination(settings),
+                state_store=state_store,
+            ),
             host=args.host,
             port=args.port,
         )

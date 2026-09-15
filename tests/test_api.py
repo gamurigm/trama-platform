@@ -104,6 +104,44 @@ def test_api_exposes_control_plane_status_projects_tasks_and_events(tmp_path):
     ]
 
 
+def test_api_status_counts_results_with_external_coordination(tmp_path):
+    class FakeCoordination:
+        def submit_task(self, task):
+            return task.task_id
+
+        def record_result(self, result):
+            return None
+
+    runtime = TramaRuntime(
+        coordination=FakeCoordination(),
+        state_store=SqliteStateStore(tmp_path / "trama.db"),
+    )
+    client = TestClient(create_app(runtime))
+    assert client.post(
+        "/v1/projects",
+        json={"project_id": "demo", "repository": "repo-a"},
+    ).status_code == 201
+    assert client.post(
+        "/v1/tasks",
+        json={
+            "task_id": "task-1",
+            "project_id": "demo",
+            "objective": "Run tests",
+            "actor": "hermes",
+            "repository": "repo-a",
+            "branch": "main",
+            "worktree": "C:/work/demo",
+            "acceptance_criteria": ["tests pass"],
+        },
+    ).status_code == 202
+    assert client.post(
+        "/v1/results",
+        json={"task_id": "task-1", "status": "succeeded", "summary": "ok"},
+    ).status_code == 202
+
+    assert client.get("/v1/status").json()["results"] == 1
+
+
 def test_api_lists_agents_and_memory_candidates_in_the_project_namespace():
     runtime = TramaRuntime()
     client = TestClient(create_app(runtime))

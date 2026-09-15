@@ -63,6 +63,19 @@ trama tui
 
 El estado del control plane se guarda en `TRAMA_STATE_DIR/trama.db`. `trama
 down` solo detiene el proceso API cuyo PID fue registrado por `trama up`.
+La coordinación usa memoria local por defecto para pruebas; para despachar
+tareas a CCCC, inicia su daemon y activa el backend explícitamente antes de
+levantar TRAMA:
+
+```powershell
+cccc daemon start
+$env:TRAMA_COORDINATION_BACKEND = "cccc"
+trama up --json
+trama status --json
+```
+
+El estado debe mostrar `coordination: CcccCliAdapter`. El backend CCCC usa
+`cccc tracked-send` para entregar tareas y `cccc send` para devolver resultados.
 Hermes se integra como proceso externo supervisado:
 
 ```powershell
@@ -110,12 +123,13 @@ Remove-Item Env:TRAMA_PIP_INSECURE
 
 El valor predeterminado mantiene la validación TLS normal.
 
-La API inicial usa almacenamiento en memoria para validar contratos y flujos.
-La persistencia productiva se conectará mediante los puertos de memoria y
-conocimiento, sin introducir SQLite como dependencia compartida.
+El control plane local persiste proyectos, tareas, resultados, candidatos,
+promociones y eventos en SQLite. Los puertos de contexto y conocimiento todavía
+usan implementaciones locales por defecto; Semantica y Utopia se conectarán como
+adaptadores externos sin convertirlos en dependencias obligatorias de TRAMA.
 
 El proceso MCP no mantiene estado de negocio propio: reenvía sus operaciones a
-la API HTTP local. Reiniciar la API reinicia el estado de esta fase inicial.
+la API HTTP local. Reiniciar la API conserva el estado persistido en SQLite.
 
 ## Registrar un proyecto
 

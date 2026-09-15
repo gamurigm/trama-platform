@@ -2,6 +2,7 @@ import importlib
 import json
 import sys
 
+import httpx
 import pytest
 
 
@@ -56,6 +57,47 @@ def test_cli_doctor_emits_nonzero_json_when_api_is_unavailable(monkeypatch, caps
         "code": "api_unavailable",
         "message": "API unavailable",
     }
+
+
+def test_cli_doctor_normalizes_connection_errors(monkeypatch, capsys):
+    cli = importlib.import_module("trama_platform.cli")
+
+    class BrokenClient:
+        def __init__(self, base_url):
+            pass
+
+        def get_status(self):
+            raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(cli, "TramaApiClient", BrokenClient)
+    monkeypatch.setattr(
+        sys, "argv", ["trama", "doctor", "--api-url", "http://trama.test", "--json"]
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main()
+
+    assert exc_info.value.code == 1
+    assert json.loads(capsys.readouterr().out) == {
+        "status": "error",
+        "code": "api_unavailable",
+        "message": "connection refused",
+    }
+
+
+def test_coordination_factory_builds_cccc_adapter():
+    cli = importlib.import_module("trama_platform.cli")
+    settings = cli.TramaSettings(
+        coordination_backend="cccc",
+        cccc_executable="cccc-test",
+        cccc_timeout_seconds=17,
+    )
+
+    adapter = cli.build_coordination(settings)
+
+    assert isinstance(adapter, cli.CcccCliAdapter)
+    assert adapter.executable == "cccc-test"
+    assert adapter.timeout_seconds == 17
 
 
 def test_cli_hermes_check_emits_adapter_status(monkeypatch, capsys):
