@@ -14,3 +14,7 @@ parte de estos contratos.
 El puente MCP usa estos contratos para validar antes de llamar a la API. La
 herramienta de memoria solo crea `MemoryCandidate`; la promoción a conocimiento
 canónico permanece fuera del conjunto de herramientas Hermes.
+
+`operation-event.v1.schema.json` describe los eventos de auditoría del control
+plane. No contiene secretos; registra actor, acción, namespace, estado y
+metadatos operativos.

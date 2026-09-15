@@ -126,3 +126,55 @@ def test_validated_memory_can_be_promoted_to_canonical_knowledge():
     )
 
     assert runtime.promote(request) == "promotion-1"
+
+
+def test_runtime_lists_agents_and_project_memory_candidates():
+    runtime = TramaRuntime()
+    runtime.register_project(
+        ProjectManifest(project_id="demo", organization_id="org-a", repository="repo-a")
+    )
+    runtime.submit_task(
+        TaskEnvelope(
+            task_id="task-agent",
+            organization_id="org-a",
+            project_id="demo",
+            objective="Run tests",
+            actor="codex",
+            repository="repo-a",
+            branch="main",
+            worktree="C:/work/demo",
+            acceptance_criteria=["tests pass"],
+        )
+    )
+    candidate = MemoryCandidate(
+        candidate_id="candidate-demo",
+        organization_id="org-a",
+        project_id="demo",
+        subject="tests",
+        fact="tests pass",
+        evidence=[Evidence(source="ci", locator="run/1")],
+        confidence=1,
+    )
+    runtime.capture_memory(candidate)
+
+    assert runtime.list_agents() == [{"agent_id": "codex", "tasks": 1, "projects": ["demo"]}]
+    assert runtime.list_memory_candidates("org-a", "demo") == [candidate]
+
+
+def test_runtime_can_cancel_and_retry_a_task():
+    runtime = TramaRuntime()
+    runtime.register_project(manifest())
+    task = TaskEnvelope(
+        task_id="task-lifecycle",
+        project_id="demo",
+        objective="Run tests",
+        actor="codex",
+        repository="https://example.test/repo",
+        branch="main",
+        worktree="C:/work/demo",
+        acceptance_criteria=["tests pass"],
+    )
+    runtime.submit_task(task)
+
+    assert runtime.cancel_task("task-lifecycle").state == "cancelled"
+    assert runtime.retry_task("task-lifecycle").state == "accepted"

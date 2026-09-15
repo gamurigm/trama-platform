@@ -6,13 +6,18 @@ from .contracts import (
     MemoryCandidate,
     MemorySearchRequest,
     ModelRequest,
+    OperationEvent,
     ProjectManifest,
     PromotionRequest,
     TaskEnvelope,
     ToolInvocation,
 )
+from .hermes import HermesAdapter
+from .lifecycle import GatewaySupervisor
 from .mcp_server import TramaApiClient, create_mcp_server
 from .runtime import TramaRuntime
+from .state_store import SqliteStateStore
+from .tui import TramaTuiApp
 
 __all__ = [
     "AgentResult",
@@ -20,6 +25,7 @@ __all__ = [
     "MemoryCandidate",
     "MemorySearchRequest",
     "ModelRequest",
+    "OperationEvent",
     "ProjectManifest",
     "PromotionRequest",
     "TaskEnvelope",
@@ -27,4 +33,8 @@ __all__ = [
     "TramaRuntime",
     "TramaApiClient",
     "create_mcp_server",
+    "HermesAdapter",
+    "GatewaySupervisor",
+    "SqliteStateStore",
+    "TramaTuiApp",
 ]

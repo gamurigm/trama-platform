@@ -10,10 +10,14 @@ pruebas, secretos y ciclo de despliegue.
 Usuario
   |
   v
-TRAMA Orchestrator
+trama CLI / TUI
   |
   v
-CCCC: tareas, actores, estados, mensajes y handoffs
+TRAMA Control Plane + API local
+  |
+  +--> SQLite local: estado, eventos y auditoria
+  |
+  +--> CCCC: tareas, actores, estados, mensajes y handoffs
   |
   +--> Codex / OpenCode / otros agentes
   |
@@ -47,9 +51,15 @@ extracción code-first y la auditoría Oracle como fuentes de evidencia. Su
 linaje `tabla -> trigger -> DML -> tabla auditiva` podrá convertirse en un
 `MemoryCandidate` y, tras validación, en una promoción a Utopia.
 
-Hermes es un consumidor supervisado de TRAMA. Puede consultar contexto,
-enviar tareas, registrar resultados y capturar candidatos con evidencia. No
-publica conocimiento canónico y no sustituye a CCCC para coordinar actores.
+Hermes es un proceso externo supervisado de TRAMA. Puede consultar contexto,
+enviar tareas, registrar resultados y capturar candidatos con evidencia a
+través de MCP `stdio`. Su TUI de conversación, modelos, skills y memoria
+propia no se duplican en TRAMA. No publica conocimiento canónico y no
+sustituye a CCCC para coordinar actores.
+
+La TUI de TRAMA consume los mismos servicios que la CLI: estado, proyectos,
+tareas, agentes derivados, eventos de auditoría y candidatos visibles. No crea
+estado paralelo ni acciones que no existan en el gateway.
 
 ## Política de fallos
 
