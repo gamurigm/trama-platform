@@ -18,6 +18,14 @@ def _is_running(pid: int) -> bool:
 
 
 def _terminate(pid: int) -> None:
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return
     os.kill(pid, signal.SIGTERM)
 
 

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import trama_platform.lifecycle as lifecycle
 from trama_platform.lifecycle import GatewaySupervisor
 
 
@@ -59,3 +60,22 @@ def test_supervisor_does_not_terminate_a_foreign_process(tmp_path: Path):
     assert result == {"status": "foreign_process", "pid": 9876}
     assert stopped == []
     assert not supervisor.pid_path.exists()
+
+
+def test_windows_terminate_closes_owned_process_tree(monkeypatch):
+    calls = []
+    monkeypatch.setattr(lifecycle.os, "name", "nt")
+    monkeypatch.setattr(
+        lifecycle.subprocess,
+        "run",
+        lambda command, **kwargs: calls.append((command, kwargs)),
+    )
+
+    lifecycle._terminate(4321)
+
+    assert calls == [
+        (
+            ["taskkill", "/PID", "4321", "/T", "/F"],
+            {"check": True, "capture_output": True, "text": True},
+        )
+    ]
