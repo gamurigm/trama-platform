@@ -83,6 +83,20 @@
       "title": "Read Only",
       "type": "boolean"
     },
+    "state": {
+      "default": "accepted",
+      "enum": [
+        "accepted",
+        "running",
+        "succeeded",
+        "partial",
+        "failed",
+        "blocked",
+        "cancelled"
+      ],
+      "title": "State",
+      "type": "string"
+    },
     "acceptance_criteria": {
       "items": {
         "type": "string"

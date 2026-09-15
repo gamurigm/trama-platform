@@ -8,7 +8,14 @@ from typing import Any, Literal
 import httpx
 from mcp.server import MCPServer
 
-from .contracts import AgentResult, Evidence, MemoryCandidate, ProjectManifest, TaskEnvelope
+from .contracts import (
+    AgentResult,
+    Evidence,
+    MemoryCandidate,
+    ProjectManifest,
+    PromotionRequest,
+    TaskEnvelope,
+)
 
 
 class TramaApiError(RuntimeError):
@@ -31,6 +38,48 @@ class TramaApiClient:
                 detail = response.text
             raise TramaApiError(f"TRAMA API {response.status_code}: {detail}")
         return response.json()
+
+    def _get(self, path: str) -> Any:
+        response = self.http_client.get(f"{self.base_url}{path}")
+        if response.is_error:
+            try:
+                detail = response.json().get("detail", response.text)
+            except ValueError:
+                detail = response.text
+            raise TramaApiError(f"TRAMA API {response.status_code}: {detail}")
+        return response.json()
+
+    def get_status(self) -> Any:
+        return self._get("/v1/status")
+
+    def list_projects(self) -> Any:
+        return self._get("/v1/projects")
+
+    def get_project(self, project_id: str) -> Any:
+        return self._get(f"/v1/projects/{project_id}")
+
+    def list_tasks(self) -> Any:
+        return self._get("/v1/tasks")
+
+    def get_task(self, task_id: str) -> Any:
+        return self._get(f"/v1/tasks/{task_id}")
+
+    def cancel_task(self, task_id: str) -> Any:
+        return self._post(f"/v1/tasks/{task_id}/cancel", {})
+
+    def retry_task(self, task_id: str) -> Any:
+        return self._post(f"/v1/tasks/{task_id}/retry", {})
+
+    def list_agents(self) -> Any:
+        return self._get("/v1/agents")
+
+    def list_memory_candidates(self, organization_id: str, project_id: str) -> Any:
+        return self._get(
+            f"/v1/memory/candidates?organization_id={organization_id}&project_id={project_id}"
+        )
+
+    def list_events(self, limit: int = 100) -> Any:
+        return self._get(f"/v1/events?limit={limit}")
 
     def register_project(self, manifest: ProjectManifest | Mapping[str, Any]) -> Any:
         payload = (
@@ -58,6 +107,14 @@ class TramaApiClient:
             else candidate
         )
         return self._post("/v1/memory/candidates", payload)
+
+    def promote(self, request: PromotionRequest | Mapping[str, Any]) -> Any:
+        payload = (
+            request.model_dump(mode="json")
+            if isinstance(request, PromotionRequest)
+            else request
+        )
+        return self._post("/v1/knowledge/promotions", payload)
 
 
 def create_mcp_server(client: TramaApiClient) -> MCPServer:

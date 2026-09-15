@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 
 def _read_int(name: str, default: int) -> int:
@@ -26,6 +27,12 @@ class TramaSettings:
     api_url: str = "http://127.0.0.1:8090"
     cccc_executable: str = "cccc"
     cccc_timeout_seconds: int = 30
+    hermes_executable: str = "hermes"
+    hermes_config_path: str = "~/.hermes/config.yaml"
+
+    @property
+    def state_path(self) -> Path:
+        return Path(self.state_dir) / "trama.db"
 
     @classmethod
     def from_env(cls) -> "TramaSettings":
@@ -40,4 +47,8 @@ class TramaSettings:
             api_url=os.getenv("TRAMA_API_URL", f"http://{api_host}:{api_port}"),
             cccc_executable=os.getenv("TRAMA_CCCC_EXECUTABLE", "cccc"),
             cccc_timeout_seconds=_read_int("TRAMA_CCCC_TIMEOUT_SECONDS", 30),
+            hermes_executable=os.getenv("TRAMA_HERMES_EXECUTABLE", "hermes"),
+            hermes_config_path=os.getenv(
+                "TRAMA_HERMES_CONFIG_PATH", "~/.hermes/config.yaml"
+            ),
         )

@@ -1,0 +1,70 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "event_id": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Event Id",
+      "type": "string"
+    },
+    "actor": {
+      "default": "system",
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Actor",
+      "type": "string"
+    },
+    "action": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Action",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "accepted",
+        "succeeded",
+        "failed",
+        "blocked"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "organization_id": {
+      "default": "default",
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Organization Id",
+      "type": "string"
+    },
+    "project_id": {
+      "anyOf": [
+        {
+          "maxLength": 100,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Project Id"
+    },
+    "details": {
+      "additionalProperties": true,
+      "title": "Details",
+      "type": "object"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "action",
+    "status"
+  ],
+  "title": "OperationEvent",
+  "type": "object"
+}

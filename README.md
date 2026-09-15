@@ -45,6 +45,36 @@ Ejecutar pruebas:
 .\.venv\Scripts\python.exe -m pytest
 ```
 
+## CLI gateway
+
+El CLI es la interfaz operativa principal de TRAMA. La API local conserva el
+estado y la TUI ofrece una vista interactiva de la misma información; no existe
+un dashboard web paralelo.
+
+```powershell
+trama up
+trama status --json
+trama doctor --json
+trama project list --json
+trama task list --json
+trama audit list --json
+trama tui
+```
+
+El estado del control plane se guarda en `TRAMA_STATE_DIR/trama.db`. `trama
+down` solo detiene el proceso API cuyo PID fue registrado por `trama up`.
+Hermes se integra como proceso externo supervisado:
+
+```powershell
+trama hermes check --json
+trama hermes configure
+trama hermes run
+```
+
+La TUI de TRAMA opera proyectos, tareas, agentes y evidencia;
+la conversación, los modelos, skills y memoria propia de Hermes siguen siendo
+responsabilidad de Hermes.
+
 Iniciar la API local:
 
 ```powershell

@@ -9,11 +9,21 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Visibility = Literal["private", "project", "shared"]
 Sensitivity = Literal["public", "internal", "restricted", "secret"]
+TaskLifecycle = Literal[
+    "accepted",
+    "running",
+    "succeeded",
+    "partial",
+    "failed",
+    "blocked",
+    "cancelled",
+]
 
 
 def utc_now() -> datetime:
@@ -63,6 +73,7 @@ class TaskEnvelope(TramaContract):
     worktree: str = Field(min_length=1, max_length=1000)
     allowed_paths: list[str] = Field(default_factory=list, max_length=500)
     read_only: bool = False
+    state: TaskLifecycle = "accepted"
     acceptance_criteria: list[str] = Field(min_length=1, max_length=100)
     created_at: datetime = Field(default_factory=utc_now)
 
@@ -118,6 +129,17 @@ class MemorySearchRequest(TramaContract):
     organization_id: str = Field(default="default", min_length=1, max_length=100)
     project_id: str = Field(min_length=1, max_length=100)
     query: str = Field(min_length=1, max_length=1000)
+
+
+class OperationEvent(TramaContract):
+    event_id: str = Field(default_factory=lambda: uuid4().hex, min_length=1, max_length=100)
+    actor: str = Field(default="system", min_length=1, max_length=100)
+    action: str = Field(min_length=1, max_length=200)
+    status: Literal["accepted", "succeeded", "failed", "blocked"]
+    organization_id: str = Field(default="default", min_length=1, max_length=100)
+    project_id: str | None = Field(default=None, max_length=100)
+    details: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class PromotionRequest(TramaContract):
