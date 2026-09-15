@@ -1,0 +1,24 @@
+# Copiar las secciones necesarias a %USERPROFILE%/.hermes/config.yaml.
+# Iniciar Hermes desde la raiz de este repositorio para que uv resuelva el proyecto.
+approvals:
+  mode: manual
+  timeout: 300
+  cron_mode: deny
+  single_query_mode: deny
+  unattended_mode: deny
+
+mcp_servers:
+  trama:
+    command: "uv"
+    args: ["run", "--project", ".", "trama", "mcp", "--api-url", "http://127.0.0.1:8090"]
+    timeout: 30
+    connect_timeout: 10
+    tools:
+      include:
+        - trama_register_project
+        - trama_search_context
+        - trama_submit_task
+        - trama_record_result
+        - trama_capture_memory
+      resources: false
+      prompts: false

@@ -17,6 +17,8 @@ CCCC: tareas, actores, estados, mensajes y handoffs
   |
   +--> Codex / OpenCode / otros agentes
   |
+  +--> Hermes local -- MCP stdio --> TRAMA API
+  |
   +--> MCP: herramientas y servicios
   |
   +--> Model Gateway: proveedores de modelos
@@ -45,6 +47,10 @@ extracción code-first y la auditoría Oracle como fuentes de evidencia. Su
 linaje `tabla -> trigger -> DML -> tabla auditiva` podrá convertirse en un
 `MemoryCandidate` y, tras validación, en una promoción a Utopia.
 
+Hermes es un consumidor supervisado de TRAMA. Puede consultar contexto,
+enviar tareas, registrar resultados y capturar candidatos con evidencia. No
+publica conocimiento canónico y no sustituye a CCCC para coordinar actores.
+
 ## Política de fallos
 
 - La ausencia de Semantica no detiene una tarea.
@@ -53,3 +59,5 @@ linaje `tabla -> trigger -> DML -> tabla auditiva` podrá convertirse en un
 - Un error de Model Gateway se registra en el `AgentResult`.
 - Un conflicto de conocimiento bloquea la promoción canónica.
 - DDL, credenciales y secretos nunca entran en la memoria compartida.
+- El servidor MCP local solo registra las herramientas declaradas en la
+  plantilla de Hermes y no expone recursos ni prompts adicionales.
