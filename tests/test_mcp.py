@@ -7,8 +7,17 @@ import httpx
 
 TOOL_NAMES = {
     "trama_register_project",
+    "trama_register_requirement",
+    "trama_register_phase",
+    "trama_register_plan_proposal",
+    "trama_approve_plan",
     "trama_search_context",
     "trama_submit_task",
+    "trama_get_overview",
+    "trama_get_task_timeline",
+    "trama_get_phase_timeline",
+    "trama_list_logs",
+    "trama_record_log",
     "trama_record_result",
     "trama_capture_memory",
 }
@@ -49,6 +58,29 @@ def test_api_client_posts_project_and_returns_api_json():
     assert seen[0].url.path == "/v1/projects"
 
 
+def test_api_client_adds_idempotency_key_when_submitting_to_go_gateway():
+    module = importlib.import_module("trama_platform.mcp_server")
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(202, json={"task_id": "task-1", "status": "accepted"})
+
+    client = module.TramaApiClient(
+        "http://trama.test",
+        task_base_url="http://gateway.test",
+        task_token="gateway-secret",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = client.submit_task({"task_id": "task-1", "project_id": "demo"})
+
+    assert result == {"task_id": "task-1", "status": "accepted"}
+    assert seen[0].url.host == "gateway.test"
+    assert seen[0].headers["idempotency-key"] == "task-1"
+    assert seen[0].headers["authorization"] == "Bearer gateway-secret"
+
+
 def test_mcp_server_exposes_only_the_scoped_trama_tools():
     module = importlib.import_module("trama_platform.mcp_server")
 
@@ -79,3 +111,36 @@ def test_cli_starts_mcp_with_the_configured_api_url(monkeypatch):
     cli.main()
 
     assert started == ["http://127.0.0.1:8181"]
+
+
+def test_cli_can_route_task_admission_from_mcp_to_the_go_gateway(monkeypatch):
+    cli = importlib.import_module("trama_platform.cli")
+    started: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(
+        cli,
+        "run_mcp",
+        lambda *args, **kwargs: started.append((args, kwargs)),
+        raising=False,
+    )
+    monkeypatch.setenv("TRAMA_GATEWAY_TOKEN", "gateway-secret")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "trama",
+            "mcp",
+            "--api-url",
+            "http://127.0.0.1:8090",
+            "--gateway-url",
+            "http://127.0.0.1:8080",
+        ],
+    )
+
+    cli.main()
+
+    assert started == [
+        (
+            ("http://127.0.0.1:8090",),
+            {"gateway_url": "http://127.0.0.1:8080", "gateway_token": "gateway-secret"},
+        )
+    ]

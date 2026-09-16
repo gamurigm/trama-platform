@@ -109,6 +109,44 @@ def test_api_exposes_control_plane_status_projects_tasks_and_events(tmp_path):
     ]
 
 
+def test_api_restores_projects_tasks_and_events_after_runtime_restart(tmp_path):
+    database = tmp_path / "trama.db"
+    first_runtime = TramaRuntime(state_store=SqliteStateStore(database))
+    with TestClient(create_app(first_runtime)) as client:
+        assert client.post(
+            "/v1/projects",
+            json={"project_id": "demo", "repository": "repo-a"},
+        ).status_code == 201
+        assert client.post(
+            "/v1/tasks",
+            json={
+                "task_id": "task-1",
+                "project_id": "demo",
+                "objective": "Run tests",
+                "actor": "codex",
+                "repository": "repo-a",
+                "branch": "main",
+                "worktree": "C:/work/demo",
+                "acceptance_criteria": ["tests pass"],
+            },
+        ).status_code == 202
+        assert first_runtime.wait_for_idle(timeout=2)
+
+    restarted_runtime = TramaRuntime(state_store=SqliteStateStore(database))
+    try:
+        with TestClient(create_app(restarted_runtime)) as client:
+            assert client.get("/v1/projects/demo").status_code == 200
+            assert client.get("/v1/tasks/task-1").status_code == 200
+            assert [item["action"] for item in client.get("/v1/events").json()] == [
+                "project.register",
+                "task.submit",
+                "task.dispatch",
+                "task.dispatch",
+            ]
+    finally:
+        restarted_runtime.close()
+
+
 def test_api_status_counts_results_with_external_coordination(tmp_path):
     class FakeCoordination:
         def submit_task(self, task):
@@ -329,3 +367,162 @@ def test_api_closes_runtime_once_during_lifespan():
         pass
 
     assert runtime.close_calls == 1
+
+
+def test_api_requires_bearer_token_when_configured():
+    settings = __import__("trama_platform.settings", fromlist=["TramaSettings"]).TramaSettings(
+        api_token="secret-token"
+    )
+    client = TestClient(create_app(TramaRuntime(), settings=settings))
+
+    assert client.get("/health").status_code == 200
+    assert client.get("/v1/status").status_code == 401
+    assert client.get(
+        "/v1/status", headers={"Authorization": "Bearer wrong-token"}
+    ).status_code == 401
+    assert client.get(
+        "/v1/status", headers={"Authorization": "Bearer secret-token"}
+    ).status_code == 200
+
+
+def test_api_exposes_planning_overview_and_human_approval_flow():
+    runtime = TramaRuntime()
+    client = TestClient(create_app(runtime))
+    try:
+        assert client.post(
+            "/v1/projects", json={"project_id": "demo", "repository": "repo-a"}
+        ).status_code == 201
+        assert client.post(
+            "/v1/requirements",
+            json={
+                "requirement_id": "REQ-1",
+                "project_id": "demo",
+                "title": "Feature",
+                "description": "Plan feature",
+                "acceptance_criteria": ["works"],
+            },
+        ).status_code == 201
+        assert client.post(
+            "/v1/phases",
+            json={
+                "phase_id": "REQ-1:build",
+                "requirement_id": "REQ-1",
+                "project_id": "demo",
+                "name": "Build",
+                "sequence": 1,
+                "acceptance_criteria": ["build passes"],
+            },
+        ).status_code == 201
+        assert client.post(
+            "/v1/tasks",
+            json={
+                "task_id": "REQ-1:build:1",
+                "requirement_id": "REQ-1",
+                "phase_id": "REQ-1:build",
+                "source": "requirement",
+                "state": "planned",
+                "project_id": "demo",
+                "objective": "Build feature",
+                "actor": "codex",
+                "repository": "repo-a",
+                "branch": "main",
+                "worktree": "C:/work/demo",
+                "acceptance_criteria": ["tests pass"],
+            },
+        ).status_code == 202
+        pending_queue = client.get("/v1/overview?project_id=demo").json()["queue"]
+        assert pending_queue[0]["task_id"] == "REQ-1:build:1"
+        assert pending_queue[0]["queue_state"] == "awaiting_approval"
+        assert client.post(
+            "/v1/phases/REQ-1:build/approve", json={"approver": "human"}
+        ).status_code == 200
+        assert client.post(
+            "/v1/tasks/REQ-1:build:1/approve", json={"approver": "human"}
+        ).status_code == 200
+        assert client.get("/v1/overview?project_id=demo").json()["queue"][0]["task_id"] == (
+            "REQ-1:build:1"
+        )
+    finally:
+        runtime.close()
+
+
+def test_api_exposes_plan_and_task_observability_routes():
+    runtime = TramaRuntime()
+    client = TestClient(create_app(runtime))
+    try:
+        assert client.post(
+            "/v1/projects", json={"project_id": "demo", "repository": "repo-a"}
+        ).status_code == 201
+        assert client.post(
+            "/v1/requirements",
+            json={
+                "requirement_id": "REQ-OBS",
+                "project_id": "demo",
+                "title": "Observability",
+                "description": "Timeline",
+                "acceptance_criteria": ["visible"],
+            },
+        ).status_code == 201
+        assert client.post(
+            "/v1/phases",
+            json={
+                "phase_id": "REQ-OBS:api",
+                "requirement_id": "REQ-OBS",
+                "project_id": "demo",
+                "name": "API",
+                "sequence": 1,
+                "acceptance_criteria": ["ready"],
+            },
+        ).status_code == 201
+        assert client.post(
+            "/v1/tasks",
+            json={
+                "task_id": "REQ-OBS:api:1",
+                "requirement_id": "REQ-OBS",
+                "phase_id": "REQ-OBS:api",
+                "source": "requirement",
+                "state": "planned",
+                "project_id": "demo",
+                "objective": "Implement timeline",
+                "actor": "codex",
+                "repository": "repo-a",
+                "branch": "main",
+                "worktree": "C:/work/demo",
+                "acceptance_criteria": ["tests pass"],
+            },
+        ).status_code == 202
+        proposal = client.post(
+            "/v1/plans",
+            json={
+                "proposal_id": "plan-obs",
+                "requirement_id": "REQ-OBS",
+                "project_id": "demo",
+                "model_profile": "codex-planner",
+                "summary": "Plan API",
+                "correlation_id": "corr-obs",
+                "phase_ids": ["REQ-OBS:api"],
+                "task_ids": ["REQ-OBS:api:1"],
+            },
+        )
+        assert proposal.status_code == 201
+        assert client.get("/v1/plans/plan-obs").json()["status"] == "proposed"
+        assert client.post(
+            "/v1/plans/plan-obs/approve", json={"approver": "human"}
+        ).status_code == 200
+        assert client.post(
+            "/v1/logs",
+            json={
+                "project_id": "demo",
+                "task_id": "REQ-OBS:api:1",
+                "phase_id": "REQ-OBS:api",
+                "requirement_id": "REQ-OBS",
+                "actor": "cccc",
+                "correlation_id": "corr-obs",
+                "message": "handoff",
+            },
+        ).status_code == 201
+        timeline = client.get("/v1/tasks/REQ-OBS:api:1/timeline").json()
+        assert timeline[-1]["kind"] == "log"
+        assert client.get("/v1/logs?project_id=demo&level=info").status_code == 200
+    finally:
+        runtime.close()

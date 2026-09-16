@@ -15,8 +15,11 @@ class HermesAdapter:
 
     TRAMA_TOOLS = [
         "trama_register_project",
+        "trama_register_requirement",
+        "trama_register_phase",
         "trama_search_context",
         "trama_submit_task",
+        "trama_get_overview",
         "trama_record_result",
         "trama_capture_memory",
     ]
