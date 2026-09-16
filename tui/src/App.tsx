@@ -172,26 +172,21 @@ export function App({ client, pollMs = 2000 }: { client: TramaApiClient; pollMs?
     }
     if (normalizedName === "down" || normalizedName === "arrowdown" || normalizedName === "j" || normalizedName === "up" || normalizedName === "arrowup" || normalizedName === "k") {
       const direction = normalizedName === "up" || normalizedName === "arrowup" || normalizedName === "k" ? -1 : 1;
-      if (navigation.screen === "tasks") {
-        const tasks = state.status === "ready"
-          ? state.data.tasks.filter((task) => !navigation.projectId || !task.project_id || task.project_id === navigation.projectId)
-          : [];
-        if (tasks.length > 0) {
-          setNavigation((current) => {
-            const atTop = direction < 0 && current.selectedIndex === 0;
-            const atBottom = direction > 0 && current.selectedIndex === tasks.length - 1;
-            if (atTop || atBottom) {
-              const currentIndex = screenIds.indexOf(current.screen);
-              const nextScreen = screenIds[(currentIndex + direction + screenIds.length) % screenIds.length] ?? "dashboard";
-              return reduceNavigation(current, { type: "open-screen", screen: nextScreen });
-            }
-            const nextIndex = (current.selectedIndex + direction + tasks.length) % tasks.length;
-            return reduceNavigation(current, { type: "select-id", id: tasks[nextIndex]?.task_id, index: nextIndex });
-          });
-        }
-        return;
-      }
       setNavigation((current) => {
+        if (current.screen === "tasks") {
+          const tasks = state.status === "ready"
+            ? state.data.tasks.filter((task) => !task.project_id || !current.projectId || task.project_id === current.projectId)
+            : [];
+          if (tasks.length === 0) return current;
+          const atBoundary = direction < 0 ? current.selectedIndex === 0 : current.selectedIndex === tasks.length - 1;
+          if (atBoundary) {
+            const currentIndex = screenIds.indexOf(current.screen);
+            const nextScreen = screenIds[(currentIndex + direction + screenIds.length) % screenIds.length] ?? "dashboard";
+            return reduceNavigation(current, { type: "open-screen", screen: nextScreen });
+          }
+          const nextIndex = (current.selectedIndex + direction + tasks.length) % tasks.length;
+          return reduceNavigation(current, { type: "select-id", id: tasks[nextIndex]?.task_id, index: nextIndex });
+        }
         const currentIndex = screenIds.indexOf(current.screen);
         const nextScreen = screenIds[(currentIndex + direction + screenIds.length) % screenIds.length] ?? "dashboard";
         return reduceNavigation(current, { type: "open-screen", screen: nextScreen });
