@@ -27,6 +27,7 @@ spec:
               -f /migrations/000001_gateway.sql
               -f /migrations/000002_control_plane.sql
               -f /migrations/000003_namespace_keys.sql
+              -f /migrations/000004_task_leases.sql
           env:
             - name: TRAMA_DATABASE_URL
               valueFrom:

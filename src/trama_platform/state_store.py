@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from time import time
 from typing import Any, Iterator, Literal, TypeVar
+from uuid import uuid4
 
 from pydantic import BaseModel
 
@@ -25,6 +26,7 @@ from .contracts import (
     TaskEnvelope,
     TaskLog,
 )
+from .leases import TaskLease
 from .observability import sanitize_message
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -125,6 +127,31 @@ class SqliteStateStore:
             connection.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version) VALUES (2)"
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS task_leases (
+                    organization_id TEXT NOT NULL,
+                    task_id TEXT NOT NULL,
+                    owner_id TEXT NOT NULL,
+                    lease_token TEXT NOT NULL,
+                    attempt INTEGER NOT NULL,
+                    claimed_at REAL NOT NULL,
+                    expires_at REAL NOT NULL,
+                    completed INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (organization_id, task_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_task_leases_active
+                ON task_leases(organization_id, expires_at)
+                WHERE completed = 0
+                """
+            )
+            connection.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version) VALUES (4)"
+            )
 
     def _save_model(self, kind: str, record_id: str, model: BaseModel) -> None:
         payload = json.dumps(model.model_dump(mode="json"), ensure_ascii=False)
@@ -175,6 +202,151 @@ class SqliteStateStore:
 
     def load_tasks(self) -> list[TaskEnvelope]:
         return self._load_models("task", TaskEnvelope)
+
+    @staticmethod
+    def _task_lease(row: sqlite3.Row) -> TaskLease:
+        return TaskLease(
+            organization_id=row["organization_id"],
+            task_id=row["task_id"],
+            owner_id=row["owner_id"],
+            lease_token=row["lease_token"],
+            attempt=int(row["attempt"]),
+            expires_at=datetime.fromtimestamp(float(row["expires_at"]), tz=timezone.utc),
+        )
+
+    def claim_task(
+        self,
+        task: TaskEnvelope,
+        *,
+        owner_id: str,
+        lease_seconds: float,
+    ) -> TaskLease | None:
+        if lease_seconds <= 0:
+            raise ValueError("lease_seconds debe ser positivo")
+        now = time()
+        expires_at = now + lease_seconds
+        lease_token = uuid4().hex
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                INSERT INTO task_leases(
+                    organization_id, task_id, owner_id, lease_token,
+                    attempt, claimed_at, expires_at, completed
+                ) VALUES (?, ?, ?, ?, 1, ?, ?, 0)
+                ON CONFLICT(organization_id, task_id) DO UPDATE SET
+                    owner_id = excluded.owner_id,
+                    lease_token = excluded.lease_token,
+                    attempt = task_leases.attempt + 1,
+                    claimed_at = excluded.claimed_at,
+                    expires_at = excluded.expires_at,
+                    completed = 0
+                WHERE task_leases.completed = 1
+                   OR task_leases.expires_at <= excluded.claimed_at
+                RETURNING organization_id, task_id, owner_id, lease_token,
+                          attempt, expires_at
+                """,
+                (
+                    task.organization_id,
+                    task.task_id,
+                    owner_id,
+                    lease_token,
+                    now,
+                    expires_at,
+                ),
+            ).fetchone()
+        return None if row is None else self._task_lease(row)
+
+    def renew_task_lease(self, lease: TaskLease, *, lease_seconds: float) -> bool:
+        if lease_seconds <= 0:
+            raise ValueError("lease_seconds debe ser positivo")
+        now = time()
+        expires_at = now + lease_seconds
+        with self._connection() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE task_leases
+                SET expires_at = ?
+                WHERE organization_id = ?
+                  AND task_id = ?
+                  AND owner_id = ?
+                  AND lease_token = ?
+                  AND completed = 0
+                  AND expires_at > ?
+                """,
+                (
+                    expires_at,
+                    lease.organization_id,
+                    lease.task_id,
+                    lease.owner_id,
+                    lease.lease_token,
+                    now,
+                ),
+            )
+        return cursor.rowcount == 1
+
+    def complete_task_lease(self, lease: TaskLease) -> bool:
+        now = time()
+        with self._connection() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE task_leases
+                SET completed = 1, expires_at = ?
+                WHERE organization_id = ?
+                  AND task_id = ?
+                  AND owner_id = ?
+                  AND lease_token = ?
+                  AND completed = 0
+                  AND expires_at > ?
+                """,
+                (
+                    now,
+                    lease.organization_id,
+                    lease.task_id,
+                    lease.owner_id,
+                    lease.lease_token,
+                    now,
+                ),
+            )
+        return cursor.rowcount == 1
+
+    def complete_task_lease_for_task(self, organization_id: str, task_id: str) -> bool:
+        now = time()
+        with self._connection() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE task_leases
+                SET completed = 1, expires_at = ?
+                WHERE organization_id = ?
+                  AND task_id = ?
+                  AND completed = 0
+                  AND expires_at > ?
+                """,
+                (now, organization_id, task_id, now),
+            )
+        return cursor.rowcount == 1
+
+    def release_task_lease(self, lease: TaskLease) -> bool:
+        now = time()
+        with self._connection() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE task_leases
+                SET expires_at = ?
+                WHERE organization_id = ?
+                  AND task_id = ?
+                  AND owner_id = ?
+                  AND lease_token = ?
+                  AND completed = 0
+                """,
+                (
+                    now,
+                    lease.organization_id,
+                    lease.task_id,
+                    lease.owner_id,
+                    lease.lease_token,
+                ),
+            )
+        return cursor.rowcount == 1
 
     def save_task_transition(self, task: TaskEnvelope, event: OperationEvent) -> None:
         task_payload = json.dumps(task.model_dump(mode="json"), ensure_ascii=False)
@@ -519,12 +691,33 @@ class PostgresStateStore:
                 completed BOOLEAN NOT NULL DEFAULT FALSE
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS trama.task_leases (
+                organization_id TEXT NOT NULL,
+                task_id TEXT NOT NULL,
+                owner_id TEXT NOT NULL,
+                lease_token TEXT NOT NULL,
+                attempt INTEGER NOT NULL,
+                claimed_at TIMESTAMPTZ NOT NULL,
+                expires_at TIMESTAMPTZ NOT NULL,
+                completed BOOLEAN NOT NULL DEFAULT FALSE,
+                PRIMARY KEY (organization_id, task_id)
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS task_leases_active_idx
+            ON trama.task_leases (organization_id, expires_at)
+            WHERE completed = FALSE
+            """,
         )
         with self._connection() as connection:
             for statement in statements:
                 connection.execute(statement)
             connection.execute(
                 "INSERT INTO trama.schema_migrations(version) VALUES (1) ON CONFLICT DO NOTHING"
+            )
+            connection.execute(
+                "INSERT INTO trama.schema_migrations(version) VALUES (4) ON CONFLICT DO NOTHING"
             )
 
     def ping(self) -> None:
@@ -602,6 +795,156 @@ class PostgresStateStore:
 
     def load_tasks(self) -> list[TaskEnvelope]:
         return self._load_models("task", TaskEnvelope)
+
+    @staticmethod
+    def _task_lease(row: dict[str, Any]) -> TaskLease:
+        expires_at = row["expires_at"]
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        else:
+            expires_at = expires_at.astimezone(timezone.utc)
+        return TaskLease(
+            organization_id=row["organization_id"],
+            task_id=row["task_id"],
+            owner_id=row["owner_id"],
+            lease_token=row["lease_token"],
+            attempt=int(row["attempt"]),
+            expires_at=expires_at,
+        )
+
+    def claim_task(
+        self,
+        task: TaskEnvelope,
+        *,
+        owner_id: str,
+        lease_seconds: float,
+    ) -> TaskLease | None:
+        if lease_seconds <= 0:
+            raise ValueError("lease_seconds debe ser positivo")
+        now = datetime.now(timezone.utc)
+        expires_at = now + timedelta(seconds=lease_seconds)
+        lease_token = uuid4().hex
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                INSERT INTO trama.task_leases(
+                    organization_id, task_id, owner_id, lease_token,
+                    attempt, claimed_at, expires_at, completed
+                ) VALUES (%s, %s, %s, %s, 1, %s, %s, FALSE)
+                ON CONFLICT (organization_id, task_id) DO UPDATE SET
+                    owner_id = EXCLUDED.owner_id,
+                    lease_token = EXCLUDED.lease_token,
+                    attempt = trama.task_leases.attempt + 1,
+                    claimed_at = EXCLUDED.claimed_at,
+                    expires_at = EXCLUDED.expires_at,
+                    completed = FALSE
+                WHERE trama.task_leases.completed = TRUE
+                   OR trama.task_leases.expires_at <= EXCLUDED.claimed_at
+                RETURNING organization_id, task_id, owner_id, lease_token,
+                          attempt, expires_at
+                """,
+                (
+                    task.organization_id,
+                    task.task_id,
+                    owner_id,
+                    lease_token,
+                    now,
+                    expires_at,
+                ),
+            ).fetchone()
+        return None if row is None else self._task_lease(row)
+
+    def renew_task_lease(self, lease: TaskLease, *, lease_seconds: float) -> bool:
+        if lease_seconds <= 0:
+            raise ValueError("lease_seconds debe ser positivo")
+        now = datetime.now(timezone.utc)
+        expires_at = now + timedelta(seconds=lease_seconds)
+        with self._connection() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE trama.task_leases
+                SET expires_at = %s
+                WHERE organization_id = %s
+                  AND task_id = %s
+                  AND owner_id = %s
+                  AND lease_token = %s
+                  AND completed = FALSE
+                  AND expires_at > %s
+                """,
+                (
+                    expires_at,
+                    lease.organization_id,
+                    lease.task_id,
+                    lease.owner_id,
+                    lease.lease_token,
+                    now,
+                ),
+            )
+        return cursor.rowcount == 1
+
+    def complete_task_lease(self, lease: TaskLease) -> bool:
+        now = datetime.now(timezone.utc)
+        with self._connection() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE trama.task_leases
+                SET completed = TRUE, expires_at = %s
+                WHERE organization_id = %s
+                  AND task_id = %s
+                  AND owner_id = %s
+                  AND lease_token = %s
+                  AND completed = FALSE
+                  AND expires_at > %s
+                """,
+                (
+                    now,
+                    lease.organization_id,
+                    lease.task_id,
+                    lease.owner_id,
+                    lease.lease_token,
+                    now,
+                ),
+            )
+        return cursor.rowcount == 1
+
+    def complete_task_lease_for_task(self, organization_id: str, task_id: str) -> bool:
+        now = datetime.now(timezone.utc)
+        with self._connection() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE trama.task_leases
+                SET completed = TRUE, expires_at = %s
+                WHERE organization_id = %s
+                  AND task_id = %s
+                  AND completed = FALSE
+                  AND expires_at > %s
+                """,
+                (now, organization_id, task_id, now),
+            )
+        return cursor.rowcount == 1
+
+    def release_task_lease(self, lease: TaskLease) -> bool:
+        now = datetime.now(timezone.utc)
+        with self._connection() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE trama.task_leases
+                SET expires_at = %s
+                WHERE organization_id = %s
+                  AND task_id = %s
+                  AND owner_id = %s
+                  AND lease_token = %s
+                  AND completed = FALSE
+                """,
+                (
+                    now,
+                    lease.organization_id,
+                    lease.task_id,
+                    lease.owner_id,
+                    lease.lease_token,
+                ),
+            )
+        return cursor.rowcount == 1
 
     def save_task_transition(self, task: TaskEnvelope, event: OperationEvent) -> None:
         task_payload = task.model_dump(mode="json")
