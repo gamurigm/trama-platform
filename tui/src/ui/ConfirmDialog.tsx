@@ -18,9 +18,15 @@ export function ConfirmDialog({ action, target, consequence, onConfirm, onCancel
 
   return (
     <box
+      position="absolute"
+      top={5}
+      left="20%"
+      right="20%"
+      zIndex={20}
+      backgroundColor={colors.panel}
       border
       borderStyle="double"
-      title="Confirmar acción"
+      title={`Confirmar ${action}`}
       titleColor={colors.attention}
       flexDirection="column"
       padding={1}

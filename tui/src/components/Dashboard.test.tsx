@@ -266,3 +266,22 @@ test("shows the shell title and keyboard hints at a narrow width", async () => {
   expect(frame).toContain("[r]");
   await destroy(setup as never);
 });
+
+test("keeps the last dashboard projection when a refresh fails", async () => {
+  let calls = 0;
+  const client = {
+    getDashboard: async () => {
+      calls += 1;
+      if (calls > 1) throw new Error("offline");
+      return appDashboard;
+    },
+  };
+  const setup = await renderApp(client);
+  await act(async () => { await setup.waitForFrame((frame) => frame.includes("Run tests")); });
+  setup.mockInput.pressKey("r");
+  await setup.waitForFrame((frame) => frame.includes("obsoletos"));
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("Run tests");
+  expect(frame).toContain("obsoletos");
+  await destroy(setup as never);
+});

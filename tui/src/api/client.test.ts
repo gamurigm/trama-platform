@@ -164,3 +164,20 @@ test("loads a task timeline with a bounded limit", async () => {
     { entry_id: "event-1", kind: "event", sequence: 1, actor: "system" },
   ]);
 });
+
+test("sends task actions as explicit POST requests", async () => {
+  const requests: Request[] = [];
+  const client = new TramaApiClient(baseUrl, (async (input, init) => {
+    const request = new Request(input, init);
+    requests.push(request);
+    return Response.json({ task_id: "task-1", state: "cancelled" });
+  }) as typeof fetch);
+
+  await expect(client.cancelTask("task-1")).resolves.toMatchObject({ task_id: "task-1", state: "cancelled" });
+  await expect(client.approveTask("task-2", "operator")).resolves.toMatchObject({ task_id: "task-1" });
+  expect(requests.map((request) => [request.method, new URL(request.url).pathname])).toEqual([
+    ["POST", "/v1/tasks/task-1/cancel"],
+    ["POST", "/v1/tasks/task-2/approve"],
+  ]);
+  expect(await requests[1]?.json()).toEqual({ approver: "operator" });
+});

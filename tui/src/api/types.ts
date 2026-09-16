@@ -56,6 +56,8 @@ export type Task = {
   created_at?: string;
 };
 
+export type TaskAction = "approve" | "cancel" | "retry";
+
 export type OperationEvent = {
   event_id?: string;
   actor?: string;

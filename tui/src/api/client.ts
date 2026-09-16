@@ -10,6 +10,7 @@ import type {
   ProjectManifest,
   Status,
   Task,
+  TaskAction,
   TaskLog,
   TimelineEntry,
 } from "./types";
@@ -263,6 +264,18 @@ export class TramaApiClient {
     return collection(await this.getJson(endpoint), "timeline", "/v1/tasks/:taskId/timeline", timeline);
   }
 
+  async approveTask(taskId: string, approver = "tui"): Promise<Task> {
+    return this.postTaskAction(taskId, "approve", { approver });
+  }
+
+  async cancelTask(taskId: string): Promise<Task> {
+    return this.postTaskAction(taskId, "cancel");
+  }
+
+  async retryTask(taskId: string): Promise<Task> {
+    return this.postTaskAction(taskId, "retry");
+  }
+
   async getTasks(): Promise<Task[]> {
     const payload = await this.getJson("/v1/tasks");
     return collection(payload, "tasks", "/v1/tasks", task);
@@ -287,11 +300,22 @@ export class TramaApiClient {
     return payload;
   }
 
-  private async getJson(endpoint: string): Promise<unknown> {
+  private async postTaskAction(taskId: string, action: TaskAction, body?: Record<string, string>): Promise<Task> {
+    const endpoint = `/v1/tasks/${encodeURIComponent(taskId)}/${action}`;
+    const payload = await this.getJson(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!isObject(payload)) throw new ApiError("Expected an object response", undefined, endpoint);
+    return task(payload, endpoint);
+  }
+
+  private async getJson(endpoint: string, init?: RequestInit): Promise<unknown> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      const response = await this.fetchImpl(`${this.baseUrl}${endpoint}`, { signal: controller.signal });
+      const response = await this.fetchImpl(`${this.baseUrl}${endpoint}`, { ...init, signal: controller.signal });
       if (!response.ok) {
         throw new ApiError(`API request failed with status ${response.status}`, response.status, endpoint);
       }
