@@ -12,11 +12,13 @@ reglas de seguridad.
 
 ## Componentes
 
+- **Gateway Go:** admisión durable, idempotencia, cuotas y entrega de eventos.
 - **Orquestador TRAMA:** planifica, delega y supervisa.
 - **CCCC:** coordina tareas, actores, estados, mensajes y handoffs.
 - **Agentes:** Codex, OpenCode y otros ejecutores especializados.
 - **Hermes Agent:** interfaz local supervisada conectada mediante MCP `stdio`.
-- **Colibri:** memoria rápida/local del agente.
+- **Colibri Inference:** proveedor local de modelos para Hermes y agentes Python.
+- **Memoria de trabajo del agente:** contexto privado y efímero de cada sesión.
 - **Semantica:** memoria contextual y episódica mediante un adaptador externo.
 - **Utopia:** conocimiento persistente y canónico mediante un adaptador externo.
 - **MCP:** conexión controlada con herramientas y servicios.
@@ -88,6 +90,39 @@ La TUI de TRAMA opera proyectos, tareas, agentes y evidencia;
 la conversación, los modelos, skills y memoria propia de Hermes siguen siendo
 responsabilidad de Hermes.
 
+### Observabilidad de planes y tareas
+
+La IA master propone un `PlanProposal` versionado a partir del requisito y su
+contexto. Hermes lo presenta para aprobación humana; solo después TRAMA marca
+las fases y tareas como disponibles para CCCC. La propuesta, la aprobación, los
+handoffs y los resultados quedan unidos por `correlation_id`.
+
+Los cambios de estado se consultan como eventos y los mensajes de ejecución
+como logs saneados:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8090/v1/plans/plan-1
+Invoke-RestMethod http://127.0.0.1:8090/v1/tasks/task-1/timeline
+Invoke-RestMethod "http://127.0.0.1:8090/v1/logs?project_id=demo&limit=50"
+```
+
+Los logs redactan tokens, cookies, claves y credenciales antes de persistirse.
+El almacenamiento SQLite permite filtrar por organización, proyecto, requisito,
+fase, tarea y nivel, y podar filas antiguas por proyecto. La TUI muestra la
+misma información como carriles de fases paralelas, cola de aprobación, cola
+CCCC, actividad reciente y timeline de la tarea seleccionada (`Enter`; `Esc`
+para volver).
+
+### Planificación por requisitos
+
+Los requisitos se registran desde la TUI o por las herramientas MCP de Hermes.
+Hermes propone fases y tareas especializadas; las tareas derivadas quedan en
+`planned` hasta recibir aprobación humana. Las fases pueden ejecutarse en
+paralelo cuando no tienen `depends_on`; las tareas pueden declarar sus propias
+dependencias. La aprobación habilita el despacho a CCCC y la TUI muestra una
+vista compacta con barras de progreso por fase, cola CCCC, origen de la tarea,
+agente asignado y estados bloqueados/completados.
+
 Iniciar la API local:
 
 ```powershell
@@ -101,6 +136,10 @@ Hermes consumirá:
 .\.venv\Scripts\python.exe -m trama_platform mcp --api-url http://127.0.0.1:8090
 ```
 
+En un despliegue distribuido, añade `--gateway-url http://127.0.0.1:8080` (y
+`TRAMA_GATEWAY_TOKEN` si el gateway exige autenticación); solo la admisión de
+tareas se enruta al gateway Go y el resto de herramientas permanece en Python.
+
 La plantilla [examples/hermes-config.yaml](examples/hermes-config.yaml) se
 puede copiar a `%USERPROFILE%\.hermes\config.yaml`. Hermes debe ejecutarse
 desde la raíz del repositorio para que `uv` resuelva este proyecto. El perfil
@@ -110,6 +149,15 @@ También puede iniciarse con Docker:
 
 ```powershell
 docker compose -f deploy/docker-compose.yml up --build
+```
+
+El entorno de gateway distribuido para desarrollo levanta PostgreSQL, NATS
+JetStream, Redis, el gateway Go, el outbox y el consumidor Python. El control
+plane y los agentes siguen siendo Python; Colibri y Hermes nunca quedan
+expuestos por el gateway público:
+
+```powershell
+docker compose -f deploy/docker-compose.gateway.yml up --build
 ```
 
 Si una red corporativa intercepta TLS y Docker muestra `UnknownIssuer`, usar
@@ -133,6 +181,45 @@ no es un broker compartido entre procesos; configura sus límites con
 `TRAMA_DISPATCH_TIMEOUT_SECONDS`. Los puertos de contexto y conocimiento todavía
 usan implementaciones locales por defecto; Semantica y Utopia se conectarán como
 adaptadores externos sin convertirlos en dependencias obligatorias de TRAMA.
+
+En el modo distribuido, `POST /v1/tasks` entra al gateway Go con una operación
+transaccional de PostgreSQL (admisión, proyección read-your-write y outbox).
+El proceso `trama-outbox` publica `task.admitted.v1` en NATS JetStream y
+`trama worker` lo consume con un durable y un inbox deduplicado; el `ack` solo
+ocurre después de que Python persiste y entrega la tarea a CCCC. Redis comparte
+el rate limit entre réplicas. Para producción, configura OIDC/JWKS o una cuenta
+de servicio y usa el chart Helm de `deploy/helm/trama-gateway`.
+
+Para conectar servicios HTTP locales o remotos, configura opcionalmente
+`TRAMA_SEMANTICA_URL`, `TRAMA_UTOPIA_URL` y `TRAMA_EXTERNAL_TOKEN`. Por ejemplo:
+
+```powershell
+$env:TRAMA_SEMANTICA_URL = "http://127.0.0.1:8101"
+$env:TRAMA_UTOPIA_URL = "http://127.0.0.1:8102"
+$env:TRAMA_EXTERNAL_TOKEN = "token-local"
+```
+
+Si las URLs no están definidas, TRAMA conserva las implementaciones locales.
+Usa HTTPS para servicios remotos.
+
+## Agentes locales y Colibri
+
+El bridge local de agentes se ejecuta en Python y es el único componente que
+inicia Hermes o usa Colibri en el equipo del agente. Colibri se consume como
+proveedor OpenAI-compatible local; una instancia atiende una generación a la
+vez, por lo que su capacidad se registra como un slot y no se confunde con la
+capacidad del gateway. Hermes mantiene el modo interactivo supervisado y el
+modo worker requiere activación explícita y sigue respetando aprobaciones
+manuales.
+
+El worker Python distribuido se inicia con:
+
+```powershell
+trama worker
+```
+
+El modo worker local de Hermes continúa siendo opt-in; consumir eventos NATS no
+concede por sí solo permiso para ejecutar acciones locales.
 
 El proceso MCP no mantiene estado de negocio propio: reenvía sus operaciones a
 la API HTTP local. Reiniciar la API conserva el estado persistido en SQLite.
