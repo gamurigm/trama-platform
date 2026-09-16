@@ -8,7 +8,7 @@ services:
       args:
         TRAMA_PIP_INSECURE: "${TRAMA_PIP_INSECURE:-0}"
     environment:
-      TRAMA_ENV: prod
+      TRAMA_ENV: local
       TRAMA_ORGANIZATION_ID: default
     ports:
       - "127.0.0.1:8090:8090"

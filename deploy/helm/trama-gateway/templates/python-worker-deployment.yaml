@@ -26,8 +26,11 @@ spec:
           env:
             - name: TRAMA_ENV
               value: prod
-            - name: TRAMA_STATE_DIR
-              value: {{ .Values.pythonWorker.stateDir | quote }}
+            - name: TRAMA_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: {{ .Values.secrets.databaseURLKey }}
             - name: TRAMA_NATS_URL
               valueFrom:
                 secretKeyRef:
@@ -35,16 +38,9 @@ spec:
                   key: {{ .Values.secrets.natsURLKey }}
             - name: TRAMA_NATS_DURABLE
               value: {{ .Values.pythonWorker.durableName | quote }}
-          volumeMounts:
-            - name: state
-              mountPath: /data
+            - name: TRAMA_NATS_ACK_WAIT_SECONDS
+              value: {{ .Values.pythonWorker.ackWaitSeconds | quote }}
+            - name: TRAMA_NATS_MAX_DELIVER
+              value: {{ .Values.pythonWorker.maxDeliver | quote }}
           resources:
             {{- toYaml .Values.pythonWorker.resources | nindent 12 }}
-      volumes:
-        - name: state
-          {{ if .Values.pythonWorker.persistence.enabled }}
-          persistentVolumeClaim:
-            claimName: {{ include "trama-gateway.fullname" . }}-python-state
-          {{ else }}
-          emptyDir: {}
-          {{ end }}

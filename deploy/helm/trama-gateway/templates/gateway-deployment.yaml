@@ -25,8 +25,17 @@ spec:
             - name: http
               containerPort: 8080
           env:
+            - name: TRAMA_ENV
+              value: prod
             - name: TRAMA_GATEWAY_ADDR
               value: ":8080"
+            - name: TRAMA_CONTROL_PLANE_URL
+              value: "http://{{ include "trama-gateway.fullname" . }}-control-plane:{{ .Values.controlPlane.service.port }}"
+            - name: TRAMA_CONTROL_PLANE_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: {{ .Values.gateway.controlPlaneInternalTokenKey }}
             - name: TRAMA_DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -78,11 +87,11 @@ spec:
                   optional: true
           readinessProbe:
             httpGet:
-              path: /health
+              path: /readyz
               port: http
           livenessProbe:
             httpGet:
-              path: /health
+              path: /livez
               port: http
           resources:
             {{- toYaml .Values.gateway.resources | nindent 12 }}

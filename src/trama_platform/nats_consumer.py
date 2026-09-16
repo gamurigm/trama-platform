@@ -100,6 +100,8 @@ class TaskAdmittedConsumer:
         subject: str = "trama.task.admitted.v1",
         stream: str = "TRAMA_EVENTS",
         durable: str = "trama-python-dispatch",
+        ack_wait_seconds: int = 30,
+        max_deliver: int = 5,
     ) -> None:
         """Consume JetStream messages until the subscription is cancelled.
 
@@ -107,11 +109,21 @@ class TaskAdmittedConsumer:
         live NATS server. With nats-py it is an ``nats.aio.client.Client``.
         """
 
+        if ack_wait_seconds < 1 or max_deliver < 1:
+            raise ValueError("ack_wait_seconds y max_deliver deben ser positivos")
         jetstream = connection.jetstream()
+        from nats.js.api import ConsumerConfig
+
+        consumer_config = ConsumerConfig(
+            durable_name=durable,
+            ack_wait=float(ack_wait_seconds),
+            max_deliver=max_deliver,
+        )
         subscription = await jetstream.subscribe(
             subject,
             stream=stream,
             durable=durable,
+            config=consumer_config,
             manual_ack=True,
         )
         try:

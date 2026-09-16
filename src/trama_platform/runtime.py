@@ -533,7 +533,13 @@ class TramaRuntime:
         self.requirements.update(
             {item.requirement_id: item for item in self.state_store.load_requirements()}
         )
+        self.proposals.update(
+            {item.proposal_id: item for item in self.state_store.load_plan_proposals()}
+        )
         self.phases.update({item.phase_id: item for item in self.state_store.load_phases()})
+        self.tasks.update({task.task_id: task for task in self.state_store.load_tasks()})
+        if isinstance(self.coordination, InMemoryCoordination):
+            self.coordination.tasks.update(self.tasks)
 
     def _dispatch_admitted_task(self, task: TaskEnvelope, *, action: str) -> str:
         project = self.projects.get(task.project_id)
@@ -577,6 +583,7 @@ class TramaRuntime:
         )
 
     def record_result(self, result: AgentResult) -> None:
+        self._refresh_state_catalog()
         if result.task_id not in self.tasks:
             raise KeyError(f"La tarea {result.task_id} no esta registrada")
         self.coordination.record_result(result)
@@ -708,19 +715,23 @@ class TramaRuntime:
         return promotion_id
 
     def list_projects(self) -> list[ProjectManifest]:
+        self._refresh_state_catalog()
         return list(self.projects.projects.values())
 
     def list_requirements(self, project_id: str | None = None) -> list[Requirement]:
+        self._refresh_state_catalog()
         items = list(self.requirements.values())
         return [item for item in items if project_id is None or item.project_id == project_id]
 
     def get_requirement(self, requirement_id: str) -> Requirement:
+        self._refresh_state_catalog()
         try:
             return self.requirements[requirement_id]
         except KeyError as exc:
             raise KeyError(f"El requisito {requirement_id} no esta registrado") from exc
 
     def list_phases(self, project_id: str | None = None) -> list[ProjectPhase]:
+        self._refresh_state_catalog()
         items = sorted(
             self.phases.values(),
             key=lambda item: (item.project_id, item.sequence, item.phase_id),
@@ -728,6 +739,7 @@ class TramaRuntime:
         return [item for item in items if project_id is None or item.project_id == project_id]
 
     def approve_phase(self, phase_id: str, *, approver: str) -> ProjectPhase:
+        self._refresh_state_catalog()
         phase = self.phases.get(phase_id)
         if phase is None:
             raise KeyError(f"La fase {phase_id} no esta registrada")
@@ -750,6 +762,7 @@ class TramaRuntime:
         return self.phases[phase_id]
 
     def approve_task(self, task_id: str, *, approver: str) -> TaskEnvelope:
+        self._refresh_state_catalog()
         task = self.get_task(task_id)
         if task.state != "planned":
             raise ValueError(f"La tarea {task_id} no esta pendiente de aprobacion")
@@ -767,12 +780,15 @@ class TramaRuntime:
         return updated
 
     def get_project(self, project_id: str) -> ProjectManifest:
+        self._refresh_state_catalog()
         return self.projects.get(project_id)
 
     def list_tasks(self) -> list[TaskEnvelope]:
+        self._refresh_state_catalog()
         return list(self.tasks.values())
 
     def get_task(self, task_id: str) -> TaskEnvelope:
+        self._refresh_state_catalog()
         try:
             return self.tasks[task_id]
         except KeyError as exc:
@@ -946,6 +962,7 @@ class TramaRuntime:
         return items[-max(1, min(limit, 1000)) :]
 
     def get_plan_proposal(self, proposal_id: str) -> PlanProposal:
+        self._refresh_state_catalog()
         try:
             return self.proposals[proposal_id]
         except KeyError as exc:

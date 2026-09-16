@@ -33,5 +33,9 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.existingSecret }}
                   key: {{ .Values.secrets.natsURLKey }}
+            - name: TRAMA_ENV
+              value: prod
+            - name: TRAMA_NATS_STREAM_REPLICAS
+              value: {{ .Values.outbox.natsStreamReplicas | quote }}
           resources:
             {{- toYaml .Values.outbox.resources | nindent 12 }}

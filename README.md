@@ -78,8 +78,10 @@ La TUI usa `TRAMA_API_URL` para seleccionar la API; si no se define, utiliza
 `http://127.0.0.1:8090`. `trama tui` permanece disponible como fallback de la
 TUI Python.
 
-El estado del control plane se guarda en `TRAMA_STATE_DIR/trama.db`. `trama
-down` solo detiene el proceso API cuyo PID fue registrado por `trama up`.
+En local, el estado del control plane se guarda en `TRAMA_STATE_DIR/trama.db`.
+En `TRAMA_ENV=prod`, `TRAMA_DATABASE_URL` es obligatorio y el backend pasa a
+PostgreSQL; SQLite no se usa para producción. `trama down` solo detiene el
+proceso API cuyo PID fue registrado por `trama up`.
 La coordinación usa memoria local por defecto para pruebas; para despachar
 tareas a CCCC, inicia su daemon y activa el backend explícitamente antes de
 levantar TRAMA:
@@ -152,8 +154,9 @@ Hermes consumirá:
 ```
 
 En un despliegue distribuido, añade `--gateway-url http://127.0.0.1:8080` (y
-`TRAMA_GATEWAY_TOKEN` si el gateway exige autenticación); solo la admisión de
-tareas se enruta al gateway Go y el resto de herramientas permanece en Python.
+`TRAMA_GATEWAY_TOKEN` si el gateway exige autenticación). Todas las llamadas
+MCP pasan por el gateway; este conserva la admisión idempotente de tareas y
+reenvía el resto del API al control plane Python privado.
 
 La plantilla [examples/hermes-config.yaml](examples/hermes-config.yaml) se
 puede copiar a `%USERPROFILE%\.hermes\config.yaml`. Hermes debe ejecutarse
@@ -187,8 +190,8 @@ Remove-Item Env:TRAMA_PIP_INSECURE
 El valor predeterminado mantiene la validación TLS normal.
 
 El control plane local persiste proyectos, tareas, resultados, candidatos,
-promociones y eventos en SQLite. El dispatcher mantiene una cola acotada dentro
-del proceso: admite hasta `TRAMA_QUEUE_CAPACITY + TRAMA_MAX_CONCURRENCY` tareas,
+promociones y eventos en SQLite. El dispatcher local mantiene una cola acotada
+dentro del proceso: admite hasta `TRAMA_QUEUE_CAPACITY + TRAMA_MAX_CONCURRENCY` tareas,
 ejecuta como máximo `TRAMA_MAX_CONCURRENCY` despachos simultáneos y devuelve
 HTTP 429 con código `queue_full` cuando no puede admitir otra tarea. Esta cola
 no es un broker compartido entre procesos; configura sus límites con
@@ -198,13 +201,28 @@ implementaciones locales por defecto. Semantica se conecta nativamente como
 `AgentContext` de Python; Utopia se conecta por el endpoint MCP HTTP de una base
 de conocimiento. Ambas integraciones son opcionales.
 
-En el modo distribuido, `POST /v1/tasks` entra al gateway Go con una operación
-transaccional de PostgreSQL (admisión, proyección read-your-write y outbox).
-El proceso `trama-outbox` publica `task.admitted.v1` en NATS JetStream y
-`trama worker` lo consume con un durable y un inbox deduplicado; el `ack` solo
-ocurre después de que Python persiste y entrega la tarea a CCCC. Redis comparte
-el rate limit entre réplicas. Para producción, configura OIDC/JWKS o una cuenta
-de servicio y usa el chart Helm de `deploy/helm/trama-gateway`.
+En el modo distribuido, todos los clientes entran por el gateway Go. `POST
+/v1/tasks` usa una operación transaccional de PostgreSQL (admisión, proyección
+read-your-write y outbox); el resto de `/v1/*` se reenvía al control plane
+Python, que también persiste en PostgreSQL. El proceso `trama-outbox` publica
+`task.admitted.v1` en NATS JetStream y `trama worker` lo consume con un durable,
+`ack_wait`, límite de entregas e inbox deduplicado; el `ack` ocurre después de
+que Python persiste y entrega la tarea a CCCC. Redis comparte el rate limit
+entre réplicas. Para producción, configura OIDC/JWKS o una cuenta de servicio,
+el token interno entre gateway y control plane, y usa el chart Helm de
+`deploy/helm/trama-gateway`.
+
+Variables mínimas del control plane distribuido:
+
+```powershell
+$env:TRAMA_ENV = "prod"
+$env:TRAMA_DATABASE_URL = "postgresql://..."
+$env:TRAMA_INTERNAL_SERVICE_TOKEN = "<secret-del-gateway>"
+$env:TRAMA_REQUIRE_TENANT_CONTEXT = "true"
+```
+
+El API Python expone `/livez` y `/readyz` para probes. El endpoint Python no
+debe publicarse fuera de la red interna; `/v1` público pertenece al gateway.
 
 Para usar Semantica en el worker Python, instala la integración y configura un
 directorio absoluto de persistencia:

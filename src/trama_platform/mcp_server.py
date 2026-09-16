@@ -35,12 +35,20 @@ class TramaApiClient:
         *,
         task_base_url: str | None = None,
         task_token: str | None = None,
+        gateway_url: str | None = None,
+        gateway_token: str | None = None,
         http_client: httpx.Client | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.task_base_url = task_base_url.rstrip("/") if task_base_url else None
-        self.task_token = task_token
+        self.gateway_url = gateway_url.rstrip("/") if gateway_url else None
+        self.gateway_token = gateway_token or task_token
         self.http_client = http_client or httpx.Client()
+
+    def _auth_headers(self) -> dict[str, str]:
+        if self.gateway_token:
+            return {"Authorization": f"Bearer {self.gateway_token}"}
+        return {}
 
     def _post(
         self,
@@ -50,8 +58,10 @@ class TramaApiClient:
         headers: Mapping[str, str] | None = None,
         base_url: str | None = None,
     ) -> Any:
+        target = base_url or self.gateway_url or self.base_url
+        request_headers = {**self._auth_headers(), **(headers or {})}
         response = self.http_client.post(
-            f"{base_url or self.base_url}{path}", json=dict(payload), headers=headers
+            f"{target}{path}", json=dict(payload), headers=request_headers
         )
         if response.is_error:
             try:
@@ -62,7 +72,8 @@ class TramaApiClient:
         return response.json()
 
     def _get(self, path: str) -> Any:
-        response = self.http_client.get(f"{self.base_url}{path}")
+        target = self.gateway_url or self.base_url
+        response = self.http_client.get(f"{target}{path}", headers=self._auth_headers())
         if response.is_error:
             try:
                 detail = response.json().get("detail", response.text)
@@ -190,13 +201,13 @@ class TramaApiClient:
         payload = task.model_dump(mode="json") if isinstance(task, TaskEnvelope) else task
         task_id = payload.get("task_id")
         headers = {"Idempotency-Key": str(task_id)} if task_id else None
-        if self.task_token:
-            headers = {**(headers or {}), "Authorization": f"Bearer {self.task_token}"}
+        if self.gateway_token:
+            headers = {**(headers or {}), "Authorization": f"Bearer {self.gateway_token}"}
         return self._post(
             "/v1/tasks",
             payload,
             headers=headers,
-            base_url=self.task_base_url,
+            base_url=self.task_base_url or self.gateway_url,
         )
 
     def record_result(self, result: AgentResult | Mapping[str, Any]) -> Any:
@@ -533,7 +544,7 @@ def run_mcp(
     create_mcp_server(
         TramaApiClient(
             api_url,
-            task_base_url=gateway_url,
-            task_token=gateway_token,
+            gateway_url=gateway_url,
+            gateway_token=gateway_token,
         )
     ).run(transport="stdio")

@@ -79,11 +79,32 @@ func main() {
 	} else if authRequired {
 		log.Fatal("TRAMA_GATEWAY_AUTH_REQUIRED is true but no OIDC or service account validator is configured")
 	} else {
+		if isProduction() {
+			log.Fatal("TRAMA_GATEWAY_AUTH_REQUIRED must be true in production")
+		}
 		log.Printf("gateway authentication is disabled; set TRAMA_GATEWAY_AUTH_REQUIRED=true in production")
 	}
 
 	store := admission.NewPostgresStore(database)
 	serverOptions = append(serverOptions, httpapi.WithTaskReader(store))
+	serverOptions = append(serverOptions, httpapi.WithReadinessCheck(database.PingContext))
+	if controlPlaneURL := os.Getenv("TRAMA_CONTROL_PLANE_URL"); controlPlaneURL != "" {
+		if isProduction() && os.Getenv("TRAMA_CONTROL_PLANE_INTERNAL_TOKEN") == "" {
+			log.Fatal("TRAMA_CONTROL_PLANE_INTERNAL_TOKEN is required in production")
+		}
+		serverOptions = append(
+			serverOptions,
+			httpapi.WithControlPlaneURL(
+				controlPlaneURL,
+				os.Getenv("TRAMA_CONTROL_PLANE_INTERNAL_TOKEN"),
+			),
+		)
+	} else {
+		if isProduction() {
+			log.Fatal("TRAMA_CONTROL_PLANE_URL is required in production")
+		}
+		log.Printf("TRAMA_CONTROL_PLANE_URL is not configured; non-task API routes are disabled")
+	}
 	server := &http.Server{
 		Addr:              gatewayAddress(),
 		Handler:           httpapi.NewServer(admission.NewService(store), serverOptions...),
@@ -107,6 +128,11 @@ func main() {
 	if err := server.Shutdown(shutdown); err != nil {
 		log.Printf("shutdown gateway: %v", err)
 	}
+}
+
+func isProduction() bool {
+	value := os.Getenv("TRAMA_ENV")
+	return strings.EqualFold(value, "prod") || strings.EqualFold(value, "production")
 }
 
 func gatewayAddress() string {

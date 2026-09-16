@@ -9,7 +9,8 @@ from typing import Any
 from .nats_consumer import TaskAdmittedConsumer
 from .runtime import TramaRuntime
 from .settings import TramaSettings
-from .state_store import SqliteStateStore, SqliteTaskInbox
+from .state_store import PostgresTaskInbox, SqliteTaskInbox
+from .storage import build_state_store
 
 NatsConnect = Callable[..., Awaitable[Any]]
 
@@ -31,7 +32,7 @@ async def serve_task_worker(
 
     owns_runtime = runtime is None
     runtime_instance = runtime or TramaRuntime(
-        state_store=SqliteStateStore(settings.state_path),
+        state_store=build_state_store(settings),
         queue_capacity=settings.queue_capacity,
         max_concurrency=settings.max_concurrency,
         dispatch_timeout_seconds=settings.dispatch_timeout_seconds,
@@ -48,15 +49,19 @@ async def serve_task_worker(
                 servers=[settings.nats_url],
                 name=settings.nats_durable,
             )
-        consumer = TaskAdmittedConsumer(
-            SqliteTaskInbox(settings.state_path),
-            runtime_instance.accept_admitted_task,
+        inbox = (
+            PostgresTaskInbox(settings.database_url)
+            if settings.database_url
+            else SqliteTaskInbox(settings.state_path)
         )
+        consumer = TaskAdmittedConsumer(inbox, runtime_instance.accept_admitted_task)
         await consumer.run(
             nats_connection,
             subject=settings.nats_subject,
             stream=settings.nats_stream,
             durable=settings.nats_durable,
+            ack_wait_seconds=settings.nats_ack_wait_seconds,
+            max_deliver=settings.nats_max_deliver,
         )
     finally:
         if owns_connection and nats_connection is not None:
