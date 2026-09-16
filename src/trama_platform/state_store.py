@@ -6,20 +6,28 @@ import json
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator, TypeVar
+from time import time
+from typing import Iterator, Literal, TypeVar
 
 from pydantic import BaseModel
 
 from .contracts import (
     AgentResult,
+    LogLevel,
     MemoryCandidate,
     OperationEvent,
+    PlanProposal,
     ProjectManifest,
+    ProjectPhase,
     PromotionRequest,
+    Requirement,
     TaskEnvelope,
+    TaskLog,
 )
+from .observability import sanitize_message
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
+InboxDecision = Literal["claimed", "duplicate", "in_flight"]
 
 
 class SqliteStateStore:
@@ -71,7 +79,50 @@ class SqliteStateStore:
                 """
             )
             connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS task_logs (
+                    log_id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    organization_id TEXT NOT NULL,
+                    project_id TEXT NOT NULL,
+                    requirement_id TEXT,
+                    phase_id TEXT,
+                    task_id TEXT,
+                    level TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    payload TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_task_logs_project
+                ON task_logs(organization_id, project_id)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_task_logs_task
+                ON task_logs(task_id, created_at, sequence)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_task_logs_phase
+                ON task_logs(phase_id, created_at, sequence)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_task_logs_requirement
+                ON task_logs(requirement_id, created_at, sequence)
+                """
+            )
+            connection.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version) VALUES (1)"
+            )
+            connection.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version) VALUES (2)"
             )
 
     def _save_model(self, kind: str, record_id: str, model: BaseModel) -> None:
@@ -99,6 +150,24 @@ class SqliteStateStore:
 
     def load_projects(self) -> list[ProjectManifest]:
         return self._load_models("project", ProjectManifest)
+
+    def save_requirement(self, requirement: Requirement) -> None:
+        self._save_model("requirement", requirement.requirement_id, requirement)
+
+    def load_requirements(self) -> list[Requirement]:
+        return self._load_models("requirement", Requirement)
+
+    def save_plan_proposal(self, proposal: PlanProposal) -> None:
+        self._save_model("plan_proposal", proposal.proposal_id, proposal)
+
+    def load_plan_proposals(self) -> list[PlanProposal]:
+        return self._load_models("plan_proposal", PlanProposal)
+
+    def save_phase(self, phase: ProjectPhase) -> None:
+        self._save_model("phase", phase.phase_id, phase)
+
+    def load_phases(self) -> list[ProjectPhase]:
+        return self._load_models("phase", ProjectPhase)
 
     def save_task(self, task: TaskEnvelope) -> None:
         self._save_model("task", task.task_id, task)
@@ -177,6 +246,129 @@ class SqliteStateStore:
             for row in reversed(rows)
         ]
 
+    def append_task_log(self, log: TaskLog) -> None:
+        message, metadata = sanitize_message(log.message, log.metadata)
+        safe_log = log.model_copy(update={"message": message, "metadata": metadata})
+        with self._connection() as connection:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO task_logs(
+                    log_id, created_at, organization_id, project_id,
+                    requirement_id, phase_id, task_id, level, sequence, payload
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    safe_log.log_id,
+                    safe_log.created_at.isoformat(),
+                    safe_log.organization_id,
+                    safe_log.project_id,
+                    safe_log.requirement_id,
+                    safe_log.phase_id,
+                    safe_log.task_id,
+                    safe_log.level,
+                    safe_log.sequence,
+                    json.dumps(safe_log.model_dump(mode="json"), ensure_ascii=False),
+                ),
+            )
+
+    @staticmethod
+    def _task_log_filters(
+        *,
+        organization_id: str | None,
+        project_id: str | None,
+        task_id: str | None,
+        phase_id: str | None,
+        requirement_id: str | None,
+        level: LogLevel | None,
+    ) -> tuple[str, list[str]]:
+        clauses = ["1 = 1"]
+        values: list[str] = []
+        for column, value in (
+            ("organization_id", organization_id),
+            ("project_id", project_id),
+            ("task_id", task_id),
+            ("phase_id", phase_id),
+            ("requirement_id", requirement_id),
+            ("level", level),
+        ):
+            if value is not None:
+                clauses.append(f"{column} = ?")
+                values.append(value)
+        return " AND ".join(clauses), values
+
+    def list_task_logs(
+        self,
+        *,
+        organization_id: str | None = None,
+        project_id: str | None = None,
+        task_id: str | None = None,
+        phase_id: str | None = None,
+        requirement_id: str | None = None,
+        level: LogLevel | None = None,
+        limit: int = 100,
+    ) -> list[TaskLog]:
+        bounded_limit = max(1, min(limit, 1000))
+        where, values = self._task_log_filters(
+            organization_id=organization_id,
+            project_id=project_id,
+            task_id=task_id,
+            phase_id=phase_id,
+            requirement_id=requirement_id,
+            level=level,
+        )
+        with self._connection() as connection:
+            rows = connection.execute(
+                f"SELECT payload FROM task_logs WHERE {where} "
+                "ORDER BY created_at ASC, sequence ASC, rowid ASC LIMIT ?",
+                [*values, bounded_limit],
+            ).fetchall()
+        return [TaskLog.model_validate(json.loads(row["payload"])) for row in rows]
+
+    def count_task_logs(
+        self,
+        *,
+        organization_id: str | None = None,
+        project_id: str | None = None,
+        task_id: str | None = None,
+        phase_id: str | None = None,
+        requirement_id: str | None = None,
+        level: LogLevel | None = None,
+    ) -> int:
+        where, values = self._task_log_filters(
+            organization_id=organization_id,
+            project_id=project_id,
+            task_id=task_id,
+            phase_id=phase_id,
+            requirement_id=requirement_id,
+            level=level,
+        )
+        with self._connection() as connection:
+            row = connection.execute(
+                f"SELECT COUNT(*) AS total FROM task_logs WHERE {where}", values
+            ).fetchone()
+        return int(row["total"])
+
+    def prune_task_logs(self, organization_id: str, project_id: str, max_rows: int) -> int:
+        if max_rows < 0:
+            raise ValueError("max_rows debe ser no negativo")
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT log_id FROM task_logs
+                WHERE organization_id = ? AND project_id = ?
+                ORDER BY created_at DESC, sequence DESC, rowid DESC
+                LIMIT -1 OFFSET ?
+                """,
+                (organization_id, project_id, max_rows),
+            ).fetchall()
+            if not rows:
+                return 0
+            cursor = connection.executemany(
+                "DELETE FROM task_logs WHERE log_id = ?",
+                [(row["log_id"],) for row in rows],
+            )
+        return int(cursor.rowcount)
+
     def count(self, kind: str) -> int:
         with self._connection() as connection:
             row = connection.execute(
@@ -189,3 +381,76 @@ class SqliteStateStore:
         with self._connection() as connection:
             row = connection.execute("SELECT COUNT(*) AS total FROM operation_events").fetchone()
         return int(row["total"])
+
+
+class SqliteTaskInbox:
+    """Inbox durable para el consumidor Python local.
+
+    Un claim caduca por tiempo de pared para que un proceso muerto no bloquee
+    una redelivery de JetStream después de reiniciar.
+    """
+
+    def __init__(self, path: str | Path, *, lease_ttl_seconds: float = 60.0) -> None:
+        if lease_ttl_seconds <= 0:
+            raise ValueError("lease_ttl_seconds debe ser positivo")
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.lease_ttl_seconds = lease_ttl_seconds
+        SqliteStateStore(self.path)
+        with self._connection() as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS consumed_events (
+                    event_id TEXT PRIMARY KEY,
+                    claimed_until REAL NOT NULL,
+                    completed INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
+
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        connection = sqlite3.connect(self.path, timeout=30)
+        connection.row_factory = sqlite3.Row
+        try:
+            yield connection
+            connection.commit()
+        finally:
+            connection.close()
+
+    def claim(self, event_id: str) -> InboxDecision:
+        now = time()
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT claimed_until, completed FROM consumed_events WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+            if row is None:
+                connection.execute(
+                    "INSERT INTO consumed_events(event_id, claimed_until) VALUES (?, ?)",
+                    (event_id, now + self.lease_ttl_seconds),
+                )
+                return "claimed"
+            if row["completed"]:
+                return "duplicate"
+            if float(row["claimed_until"]) > now:
+                return "in_flight"
+            connection.execute(
+                "UPDATE consumed_events SET claimed_until = ? WHERE event_id = ?",
+                (now + self.lease_ttl_seconds, event_id),
+            )
+            return "claimed"
+
+    def complete(self, event_id: str) -> None:
+        with self._connection() as connection:
+            connection.execute(
+                "UPDATE consumed_events SET completed = 1, claimed_until = 0 WHERE event_id = ?",
+                (event_id,),
+            )
+
+    def release(self, event_id: str) -> None:
+        with self._connection() as connection:
+            connection.execute(
+                "UPDATE consumed_events SET claimed_until = 0 WHERE event_id = ? AND completed = 0",
+                (event_id,),
+            )
