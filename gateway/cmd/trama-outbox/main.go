@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,9 +20,10 @@ import (
 )
 
 type config struct {
-	databaseURL string
-	natsURL     string
-	batchSize   int
+	databaseURL  string
+	natsURL      string
+	batchSize    int
+	natsReplicas int
 }
 
 func loadConfig() (config, error) {
@@ -41,7 +43,24 @@ func loadConfig() (config, error) {
 	if natsURL == "" {
 		natsURL = "nats://127.0.0.1:4222"
 	}
-	return config{databaseURL: databaseURL, natsURL: natsURL, batchSize: batchSize}, nil
+	natsReplicas := 1
+	if strings.EqualFold(os.Getenv("TRAMA_ENV"), "prod") ||
+		strings.EqualFold(os.Getenv("TRAMA_ENV"), "production") {
+		natsReplicas = 3
+	}
+	if raw := os.Getenv("TRAMA_NATS_STREAM_REPLICAS"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			return config{}, fmt.Errorf("TRAMA_NATS_STREAM_REPLICAS must be positive")
+		}
+		natsReplicas = parsed
+	}
+	return config{
+		databaseURL:  databaseURL,
+		natsURL:      natsURL,
+		batchSize:    batchSize,
+		natsReplicas: natsReplicas,
+	}, nil
 }
 
 func main() {
@@ -67,7 +86,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("open JetStream: %v", err)
 	}
-	if err := ensureStream(jetstream); err != nil {
+	if err := ensureStream(jetstream, configuration.natsReplicas); err != nil {
 		log.Fatalf("ensure task stream: %v", err)
 	}
 
@@ -91,8 +110,15 @@ func main() {
 	}
 }
 
-func ensureStream(stream nats.JetStreamContext) error {
-	if _, err := stream.StreamInfo("TRAMA_EVENTS"); err == nil {
+func ensureStream(stream nats.JetStreamContext, replicas int) error {
+	if info, err := stream.StreamInfo("TRAMA_EVENTS"); err == nil {
+		if info.Config.Replicas < replicas {
+			return fmt.Errorf(
+				"TRAMA_EVENTS has %d replicas; production requires at least %d",
+				info.Config.Replicas,
+				replicas,
+			)
+		}
 		return nil
 	}
 	_, err := stream.AddStream(&nats.StreamConfig{
@@ -101,7 +127,7 @@ func ensureStream(stream nats.JetStreamContext) error {
 		Storage:   nats.FileStorage,
 		Retention: nats.LimitsPolicy,
 		MaxAge:    7 * 24 * time.Hour,
-		Replicas:  1,
+		Replicas:  replicas,
 	})
 	if err != nil && !errors.Is(err, nats.ErrStreamNameAlreadyInUse) {
 		return err

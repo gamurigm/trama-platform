@@ -183,9 +183,9 @@ def test_consumer_keeps_subscription_alive_for_a_transient_handler_failure():
     assert first.ack_count == 0
     assert redelivery.ack_count == 1
     assert subscription.unsubscribed
-    assert jetstream.arguments == {
-        "subject": "trama.task.admitted.v1",
-        "stream": "TRAMA_EVENTS",
-        "durable": "trama-python-dispatch",
-        "manual_ack": True,
-    }
+    assert jetstream.arguments["subject"] == "trama.task.admitted.v1"
+    assert jetstream.arguments["stream"] == "TRAMA_EVENTS"
+    assert jetstream.arguments["durable"] == "trama-python-dispatch"
+    assert jetstream.arguments["manual_ack"] is True
+    assert jetstream.arguments["config"].max_deliver == 5
+    assert jetstream.arguments["config"].ack_wait == 30.0

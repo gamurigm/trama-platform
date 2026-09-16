@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -171,5 +172,106 @@ func TestGetTaskReadsTheCommittedProjectionWithReadYourWriteConsistency(t *testi
 	if !bytes.Contains(recorder.Body.Bytes(), []byte(`"task_id":"task-1"`)) ||
 		!bytes.Contains(recorder.Body.Bytes(), []byte(`"state":"accepted"`)) {
 		t.Fatalf("expected committed task projection, got %s", recorder.Body.String())
+	}
+}
+
+func TestUnmatchedV1RoutesAreProxiedWithTheAuthenticatedNamespace(t *testing.T) {
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if got := request.Header.Get("X-Organization-ID"); got != "org-a" {
+			t.Errorf("expected organization header, got %q", got)
+		}
+		if got := request.Header.Get("X-Actor-ID"); got != "user-1" {
+			t.Errorf("expected actor header, got %q", got)
+		}
+		if got := request.Header.Get("X-Scopes"); got != "projects:read" {
+			t.Errorf("expected scope header, got %q", got)
+		}
+		if got := request.Header.Get("X-Trama-Internal-Token"); got != "internal-secret" {
+			t.Errorf("expected internal token, got %q", got)
+		}
+		if request.Header.Get("Authorization") != "" {
+			t.Error("public authorization header must not be forwarded")
+		}
+		writer.WriteHeader(http.StatusOK)
+		_, _ = writer.Write([]byte(`{"service":"control-plane"}`))
+	}))
+	defer controlPlane.Close()
+
+	handler := NewServer(
+		admission.NewService(admission.NewMemoryStore()),
+		WithAuthenticator(projectAuthValidator{}),
+		WithControlPlaneURL(controlPlane.URL, "internal-secret"),
+	)
+	request := httptest.NewRequest(http.MethodGet, "/v1/projects", nil)
+	request.Header.Set("Authorization", "Bearer any")
+	request.Header.Set("X-Correlation-ID", "corr-1")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "control-plane") {
+		t.Fatalf("expected proxied response, got %s", recorder.Body.String())
+	}
+}
+
+type projectAuthValidator struct{}
+
+func (projectAuthValidator) Validate(context.Context, string) (auth.Principal, error) {
+	return auth.Principal{
+		Subject:        "user-1",
+		OrganizationID: "org-a",
+		Scopes:         []string{"projects:read"},
+	}, nil
+}
+
+func TestGatewayExposesSeparateLivenessAndReadinessProbes(t *testing.T) {
+	handler := NewServer(admission.NewService(admission.NewMemoryStore()))
+
+	for _, path := range []string{"/livez", "/readyz"} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusOK {
+			t.Errorf("expected %s to return 200, got %d", path, recorder.Code)
+		}
+	}
+}
+
+func TestGatewayProbesRemainPublicWhenAuthenticationIsEnabled(t *testing.T) {
+	handler := NewServer(
+		admission.NewService(admission.NewMemoryStore()),
+		WithAuthenticator(taskAuthValidator{}),
+	)
+
+	for _, path := range []string{"/health", "/livez", "/readyz"} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusOK {
+			t.Errorf("expected unauthenticated %s to return 200, got %d", path, recorder.Code)
+		}
+	}
+}
+
+func TestProxiedRoutesRequireTheResourceReadScope(t *testing.T) {
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusOK)
+	}))
+	defer controlPlane.Close()
+
+	handler := NewServer(
+		admission.NewService(admission.NewMemoryStore()),
+		WithAuthenticator(taskAuthValidator{}),
+		WithControlPlaneURL(controlPlane.URL, "internal-secret"),
+	)
+	request := httptest.NewRequest(http.MethodGet, "/v1/projects", nil)
+	request.Header.Set("Authorization", "Bearer any")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("expected missing projects:read scope to return 403, got %d", recorder.Code)
 	}
 }

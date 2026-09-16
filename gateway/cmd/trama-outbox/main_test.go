@@ -3,6 +3,7 @@ package main
 import "testing"
 
 func TestOutboxConfigurationUsesSafeLocalDefaults(t *testing.T) {
+	t.Setenv("TRAMA_ENV", "local")
 	t.Setenv("TRAMA_DATABASE_URL", "")
 	t.Setenv("TRAMA_NATS_URL", "")
 	t.Setenv("TRAMA_DATABASE_URL", "postgres://local/test")
@@ -15,6 +16,23 @@ func TestOutboxConfigurationUsesSafeLocalDefaults(t *testing.T) {
 	}
 	if config.batchSize != 100 {
 		t.Fatalf("unexpected batch default: %d", config.batchSize)
+	}
+	if config.natsReplicas != 1 {
+		t.Fatalf("unexpected local NATS replica default: %d", config.natsReplicas)
+	}
+}
+
+func TestOutboxConfigurationUsesDurableProductionNATSDefaults(t *testing.T) {
+	t.Setenv("TRAMA_ENV", "prod")
+	t.Setenv("TRAMA_DATABASE_URL", "postgres://local/test")
+	t.Setenv("TRAMA_NATS_STREAM_REPLICAS", "")
+
+	config, err := loadConfig()
+	if err != nil {
+		t.Fatalf("load production defaults: %v", err)
+	}
+	if config.natsReplicas != 3 {
+		t.Fatalf("unexpected production NATS replica default: %d", config.natsReplicas)
 	}
 }
 

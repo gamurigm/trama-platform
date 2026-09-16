@@ -650,6 +650,20 @@ def test_runtime_refreshes_projects_written_by_the_control_api_process(tmp_path:
         worker_runtime.close()
 
 
+def test_runtime_refreshes_shared_store_before_reads(tmp_path: Path):
+    database = tmp_path / "shared.db"
+    first = TramaRuntime(state_store=SqliteStateStore(database))
+    second = TramaRuntime(state_store=SqliteStateStore(database))
+    try:
+        first.register_project(scoped_manifest())
+        first.submit_task(task("shared-task"))
+
+        assert [item.task_id for item in second.list_tasks()] == ["shared-task"]
+    finally:
+        first.close()
+        second.close()
+
+
 def test_cancelled_queued_task_is_not_dispatched():
     runtime, coordination = runtime_with_blocking_coordination(
         queue_capacity=1,

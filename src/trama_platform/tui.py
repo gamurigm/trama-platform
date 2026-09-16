@@ -229,7 +229,18 @@ class TramaTuiApp(App[None]):
         return "\n".join(lines)
 
 
-def run_tui(api_url: str) -> None:
-    """Inicia la consola operativa contra la API local."""
+def run_tui(
+    api_url: str,
+    *,
+    gateway_url: str | None = None,
+    gateway_token: str | None = None,
+) -> None:
+    """Inicia la consola operativa contra la API o el gateway configurado."""
 
-    TramaTuiApp(TramaApiClient(api_url)).run()
+    TramaTuiApp(
+        TramaApiClient(
+            api_url,
+            gateway_url=gateway_url,
+            gateway_token=gateway_token,
+        )
+    ).run()

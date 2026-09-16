@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "trama-gateway.fullname" . }}-control-plane
+  labels:
+    {{- include "trama-gateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+spec:
+  replicas: {{ .Values.controlPlane.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "trama-gateway.name" . }}
+      app.kubernetes.io/component: control-plane
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "trama-gateway.labels" . | nindent 8 }}
+        app.kubernetes.io/component: control-plane
+    spec:
+      containers:
+        - name: control-plane
+          image: "{{ .Values.controlPlane.image.repository }}:{{ .Values.controlPlane.image.tag }}"
+          imagePullPolicy: {{ .Values.controlPlane.image.pullPolicy }}
+          command: ["trama", "api", "--host", "0.0.0.0", "--port", "8090"]
+          ports:
+            - name: http
+              containerPort: 8090
+          env:
+            - name: TRAMA_ENV
+              value: prod
+            - name: TRAMA_API_HOST
+              value: 0.0.0.0
+            - name: TRAMA_API_PORT
+              value: "8090"
+            - name: TRAMA_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: {{ .Values.secrets.databaseURLKey }}
+            - name: TRAMA_REQUIRE_TENANT_CONTEXT
+              value: "true"
+            - name: TRAMA_INTERNAL_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: {{ .Values.controlPlane.internalTokenKey }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+          resources:
+            {{- toYaml .Values.controlPlane.resources | nindent 12 }}

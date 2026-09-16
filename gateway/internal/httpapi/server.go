@@ -2,11 +2,15 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gamur/trama/gateway/internal/admission"
@@ -21,6 +25,9 @@ type Server struct {
 	rateLimitWindow time.Duration
 	authenticator   auth.Validator
 	taskReader      admission.TaskReader
+	controlPlane    http.Handler
+	proxyError      error
+	readyCheck      func(context.Context) error
 }
 
 type ServerOption func(*Server)
@@ -45,6 +52,42 @@ func WithTaskReader(reader admission.TaskReader) ServerOption {
 	}
 }
 
+func WithControlPlaneURL(rawURL string, internalToken string) ServerOption {
+	return func(server *Server) {
+		target, err := url.Parse(rawURL)
+		if err != nil || target.Scheme == "" || target.Host == "" {
+			server.proxyError = errors.New("control plane URL is invalid")
+			return
+		}
+		proxy := httputil.NewSingleHostReverseProxy(target)
+		originalDirector := proxy.Director
+		proxy.Director = func(request *http.Request) {
+			originalDirector(request)
+			if principal, authenticated := auth.PrincipalFromContext(request.Context()); authenticated {
+				request.Header.Set("X-Organization-ID", principal.OrganizationID)
+				request.Header.Set("X-Actor-ID", principal.Subject)
+				request.Header.Set("X-Scopes", strings.Join(principal.Scopes, " "))
+				request.Header.Del("Authorization")
+			}
+			if internalToken != "" {
+				request.Header.Set("X-Trama-Internal-Token", internalToken)
+			}
+		}
+		proxy.ErrorHandler = func(writer http.ResponseWriter, _ *http.Request, err error) {
+			writeJSON(writer, http.StatusBadGateway, errorResponse{
+				Code: "control_plane_unavailable", Message: "Control plane is unavailable",
+			})
+		}
+		server.controlPlane = proxy
+	}
+}
+
+func WithReadinessCheck(check func(context.Context) error) ServerOption {
+	return func(server *Server) {
+		server.readyCheck = check
+	}
+}
+
 func NewServer(admissionService *admission.Service, options ...ServerOption) http.Handler {
 	server := Server{admission: admissionService}
 	for _, option := range options {
@@ -53,15 +96,75 @@ func NewServer(admissionService *admission.Service, options ...ServerOption) htt
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/tasks", server.submitTask)
 	mux.HandleFunc("GET /v1/tasks/{task_id}", server.getTask)
+	if server.controlPlane != nil {
+		mux.Handle("/v1/", http.HandlerFunc(server.forwardToControlPlane))
+	}
 	mux.HandleFunc("GET /health", health)
+	mux.HandleFunc("GET /livez", live)
+	mux.HandleFunc("GET /readyz", server.ready)
 	if server.authenticator != nil {
 		return auth.Middleware(mux, server.authenticator)
 	}
 	return mux
 }
 
+func (s Server) forwardToControlPlane(writer http.ResponseWriter, request *http.Request) {
+	if s.controlPlane == nil {
+		writeJSON(writer, http.StatusNotImplemented, errorResponse{
+			Code: "control_plane_unavailable", Message: "Control plane proxy is not configured",
+		})
+		return
+	}
+	if principal, authenticated := auth.PrincipalFromContext(request.Context()); authenticated {
+		requiredScope := proxyScope(request)
+		if requiredScope != "" && !auth.HasScope(principal, requiredScope) {
+			writeJSON(writer, http.StatusForbidden, errorResponse{
+				Code: "insufficient_scope", Message: requiredScope + " scope is required",
+			})
+			return
+		}
+	}
+	s.controlPlane.ServeHTTP(writer, request)
+}
+
+func proxyScope(request *http.Request) string {
+	path := strings.TrimPrefix(request.URL.Path, "/v1/")
+	resource, _, _ := strings.Cut(path, "/")
+	if resource == "" {
+		return ""
+	}
+	if request.Method == http.MethodGet || request.Method == http.MethodHead {
+		return resource + ":read"
+	}
+	return resource + ":write"
+}
+
 func health(writer http.ResponseWriter, _ *http.Request) {
 	writeJSON(writer, http.StatusOK, map[string]string{"service": "trama-gateway", "status": "ok"})
+}
+
+func live(writer http.ResponseWriter, _ *http.Request) {
+	writeJSON(writer, http.StatusOK, map[string]string{"service": "trama-gateway", "status": "alive"})
+}
+
+func (s Server) ready(writer http.ResponseWriter, request *http.Request) {
+	if s.readyCheck != nil {
+		readyContext, cancel := context.WithTimeout(request.Context(), 2*time.Second)
+		defer cancel()
+		if err := s.readyCheck(readyContext); err != nil {
+			writeJSON(writer, http.StatusServiceUnavailable, errorResponse{
+				Code: "gateway_not_ready", Message: "Gateway dependencies are unavailable",
+			})
+			return
+		}
+	}
+	if s.proxyError != nil {
+		writeJSON(writer, http.StatusServiceUnavailable, errorResponse{
+			Code: "control_plane_misconfigured", Message: "Control plane URL is invalid",
+		})
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]string{"service": "trama-gateway", "status": "ready"})
 }
 
 func (s Server) submitTask(writer http.ResponseWriter, request *http.Request) {

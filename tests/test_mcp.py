@@ -111,6 +111,27 @@ def test_api_client_reads_results_and_reviews_memory_in_a_namespace():
     assert seen[1].url.params["project_id"] == "demo"
 
 
+def test_api_client_routes_all_control_plane_calls_through_the_gateway_when_configured():
+    module = importlib.import_module("trama_platform.mcp_server")
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=[])
+
+    client = module.TramaApiClient(
+        "http://private-control-plane.test",
+        gateway_url="http://gateway.test",
+        gateway_token="gateway-secret",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    client.list_projects()
+
+    assert seen[0].url.host == "gateway.test"
+    assert seen[0].headers["authorization"] == "Bearer gateway-secret"
+
+
 def test_mcp_server_exposes_only_the_scoped_trama_tools():
     module = importlib.import_module("trama_platform.mcp_server")
 

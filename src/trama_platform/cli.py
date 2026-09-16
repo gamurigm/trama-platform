@@ -32,7 +32,7 @@ from .ports import CoordinationPort
 from .project import load_project_manifest
 from .semantica_adapter import SemanticaContextAdapter
 from .settings import TramaSettings
-from .state_store import SqliteStateStore
+from .storage import build_state_store
 from .utopia_mcp import UtopiaMcpAdapter
 from .worker import run_task_worker
 
@@ -448,6 +448,7 @@ def main() -> None:
 
     tui_parser = subparsers.add_parser("tui", help="Inicia la consola operativa")
     _add_api_options(tui_parser, settings)
+    tui_parser.add_argument("--gateway-url", default=settings.gateway_url)
 
     project_validation_parser = subparsers.add_parser("validate-project")
     project_validation_parser.add_argument("path")
@@ -459,7 +460,7 @@ def main() -> None:
     if args.command == "api":
         import uvicorn
 
-        state_store = SqliteStateStore(settings.state_path)
+        state_store = build_state_store(settings)
         uvicorn.run(
             create_app(
                 coordination=build_coordination(settings),
@@ -473,7 +474,12 @@ def main() -> None:
         )
     elif args.command == "mcp":
         if args.mcp_command == "check":
-            status = TramaApiClient(args.api_url).get_status()
+            client_options: dict[str, str] = {}
+            if args.gateway_url:
+                client_options["gateway_url"] = args.gateway_url
+            if settings.gateway_token:
+                client_options["gateway_token"] = settings.gateway_token
+            status = TramaApiClient(args.api_url, **client_options).get_status()
             _emit(
                 {
                     "status": status.get("status", "unknown"),
@@ -511,7 +517,11 @@ def main() -> None:
     elif args.command == "tui":
         from .tui import run_tui
 
-        run_tui(args.api_url)
+        run_tui(
+            args.api_url,
+            gateway_url=args.gateway_url,
+            gateway_token=settings.gateway_token,
+        )
     elif args.command == "validate-project":
         print(
             json.dumps(

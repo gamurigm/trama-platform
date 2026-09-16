@@ -7,22 +7,19 @@ pruebas, secretos y ciclo de despliegue.
 ## Separación de responsabilidades
 
 ```text
-Usuario
+Todos los clientes (CLI / TUI / Hermes MCP)
   |
   v
-trama CLI / TUI
+Gateway Go (único borde: auth, cuotas, idempotencia y proxy)
+  |\
+  | +--> PostgreSQL: admisiones, estado, eventos, logs e inbox
+  | +--> NATS JetStream: transporte durable, no fuente de verdad
   |
   v
-Gateway Go (admisión, cuotas, auth, idempotencia y lectura)
+TRAMA Control Plane Python (privado, réplicas sin PVC)
   |
-  +--> PostgreSQL: admisiones, proyecciones y outbox
-  |
-  +--> NATS JetStream: comandos y eventos durables
-  |
-  v
-TRAMA Control Plane Python
-  |
-  +--> Cola local SQLite solo para desarrollo aislado
+  +--> PostgreSQL: fuente de verdad del control plane
+  +--> Workers Python: CCCC, retries e inbox por evento
   |
   +--> CCCC: tareas, actores, estados, mensajes y handoffs
   |
@@ -36,8 +33,6 @@ TRAMA Control Plane Python
   |
   +--> Local Agent Bridge Python: slots, leases y procesos locales
 
-  +--> Task admission client --> Gateway Go
-  |
   +--> Semantica AgentContext: contexto, decisiones y memoria episódica
               |
               +--> evidencia aprobada --> Utopia MCP: conocimiento canónico
@@ -126,22 +121,26 @@ la poda por proyecto. Hermes obtiene estas consultas por MCP, mientras que la
 TUI las muestra como un radar compacto: carriles de fases paralelas, cola CCCC,
 aprobaciones pendientes, bloqueadores y última actividad.
 
-La cola de tareas local es acotada al proceso para proteger el control plane
+En local, la cola de tareas es acotada al proceso para proteger el control plane
 aislado:
 `TRAMA_QUEUE_CAPACITY` limita las tareas pendientes y
 `TRAMA_MAX_CONCURRENCY` los despachos simultáneos. Cuando se alcanza la
 capacidad admitida, la API responde `429 queue_full`; no se introduce un broker
 compartido en esta fase.
 
-En el modo distribuido, la admisión Go escribe PostgreSQL y su outbox en la
-misma transacción. El outbox reclama filas con `FOR UPDATE SKIP LOCKED`, las
-publica con `Nats-Msg-Id` y libera el lease si falla el publish. El consumidor
-Python usa el durable `trama-python-dispatch`, valida `task.admitted.v1`,
-deduplica por `Nats-Msg-Id` y solo hace `ack` tras persistir/entregar la tarea.
-Redis aplica el límite de admisión con un script Lua atómico compartido entre
-réplicas. Kubernetes se configura con el chart de
-`deploy/helm/trama-gateway`; PostgreSQL, Redis y NATS deben ser servicios
-gestionados o instalados aparte, y sus URLs llegan por un Secret existente.
+En el modo distribuido, la admisión Go y el outbox escriben PostgreSQL en la
+misma transacción. El gateway reenvía el resto de `/v1/*` al servicio privado
+Python y propaga el principal como `X-Organization-ID`, `X-Project-ID`,
+`X-Actor-ID`, scopes y correlación, autenticado con un token interno. El
+outbox reclama filas con `FOR UPDATE SKIP LOCKED`, las publica con
+`Nats-Msg-Id` y libera el lease si falla el publish. El consumidor Python usa
+el durable `trama-python-dispatch`, `ack_wait` y `max_deliver`, deduplica por
+`Nats-Msg-Id` mediante `trama.consumed_events` y solo hace `ack` tras
+persistir/entregar la tarea. Redis aplica el límite de admisión compartido
+entre réplicas. Kubernetes crea el schema mediante un Job de migración,
+mantiene el servicio Python como ClusterIP y no monta PVC de estado. PostgreSQL,
+Redis y NATS deben ser servicios gestionados o releases separados; sus URLs y
+tokens llegan por un Secret existente.
 
 ## Política de fallos
 

@@ -52,7 +52,7 @@ func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 
 func Middleware(next http.Handler, validator Validator) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == "/health" {
+		if request.URL.Path == "/health" || request.URL.Path == "/livez" || request.URL.Path == "/readyz" {
 			next.ServeHTTP(writer, request)
 			return
 		}
