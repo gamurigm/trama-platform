@@ -256,7 +256,7 @@ test("moves between shell screens with arrow keys", async () => {
   const client = { getDashboard: async () => appDashboard };
   const setup = await renderApp(client, 100);
   await act(async () => { await setup.waitForFrame((frame) => frame.includes("Run tests")); });
-  setup.mockInput.pressArrow("down");
+  await act(async () => { setup.mockInput.pressArrow("down"); });
   await setup.waitForFrame((frame) => frame.includes("TRAMA  ·  Projects"));
   expect(setup.captureCharFrame()).toContain("Projects");
   setup.mockInput.pressArrow("up");
@@ -266,20 +266,29 @@ test("moves between shell screens with arrow keys", async () => {
 });
 
 test("opens the selected task timeline with Enter", async () => {
+  const tasksDashboard: DashboardData = {
+    ...appDashboard,
+    tasks: [
+      ...appDashboard.tasks,
+      { task_id: "task-2", objective: "Deploy", actor: "hermes", state: "queued", source: "local" },
+    ],
+  };
   const client = {
-    getDashboard: async () => appDashboard,
-    getTaskTimeline: async () => [{ entry_id: "entry-1", kind: "event", sequence: 1, actor: "system", action: "task.accepted", status: "accepted" }],
+    getDashboard: async () => tasksDashboard,
+    getTaskTimeline: async (taskId: string) => [{ entry_id: "entry-1", kind: "event", sequence: 1, actor: "system", action: `${taskId}.accepted`, status: "accepted" }],
   };
   const setup = await renderApp(client, 100);
   await act(async () => { await setup.waitForFrame((frame) => frame.includes("Run tests")); });
-  setup.mockInput.pressArrow("down");
+  await act(async () => { setup.mockInput.pressArrow("down"); });
   await setup.waitForFrame((frame) => frame.includes("Projects"));
-  setup.mockInput.pressArrow("down");
+  await act(async () => { setup.mockInput.pressArrow("down"); });
   await setup.waitForFrame((frame) => frame.includes("Tasks"));
   await setup.waitForVisualIdle({ quietFrames: 2 });
+  await act(async () => { setup.mockInput.pressArrow("down"); });
+  await setup.waitForFrame((frame) => frame.includes("Deploy") && frame.includes("[Enter detalle]"));
   await act(async () => { setup.mockInput.pressEnter(); });
   await setup.waitForFrame((frame) => frame.includes("Timeline"));
-  expect(setup.captureCharFrame()).toContain("task.accepted");
+  expect(setup.captureCharFrame()).toContain("task-2.accepted");
   setup.mockInput.pressEscape();
   await setup.waitForFrame((frame) => frame.includes("TRAMA  ·  Tasks"));
   await destroy(setup as never);

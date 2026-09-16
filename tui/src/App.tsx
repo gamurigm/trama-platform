@@ -40,6 +40,8 @@ export function App({ client, pollMs = 2000 }: { client: TramaApiClient; pollMs?
   const [pendingAction, setPendingAction] = useState<PendingAction>();
   const [detail, setDetail] = useState<DetailState>();
   const [navigation, setNavigation] = useState(initialNavigation);
+  const navigationRef = useRef(navigation);
+  navigationRef.current = navigation;
   const requestInFlight = useRef(false);
 
   const refresh = useCallback(async () => {
@@ -153,7 +155,11 @@ export function App({ client, pollMs = 2000 }: { client: TramaApiClient; pollMs?
     if (normalizedName === "r") void refresh();
     if (normalizedName === "q") renderer.destroy();
     if ((normalizedName === "enter" || normalizedName === "return") && navigation.screen === "tasks") {
-      const taskId = navigation.selectedId ?? (state.status === "ready" ? state.data.tasks[0]?.task_id : undefined);
+      const currentNavigation = navigationRef.current;
+      const tasks = state.status === "ready"
+        ? state.data.tasks.filter((task) => !currentNavigation.projectId || !task.project_id || task.project_id === currentNavigation.projectId)
+        : [];
+      const taskId = currentNavigation.selectedId ?? tasks[currentNavigation.selectedIndex]?.task_id;
       if (taskId) {
         setDetail({ kind: "Task", id: taskId, timeline: [], loading: true });
         void client.getTaskTimeline(taskId).then((timeline) => {
@@ -166,6 +172,18 @@ export function App({ client, pollMs = 2000 }: { client: TramaApiClient; pollMs?
     }
     if (normalizedName === "down" || normalizedName === "arrowdown" || normalizedName === "j" || normalizedName === "up" || normalizedName === "arrowup" || normalizedName === "k") {
       const direction = normalizedName === "up" || normalizedName === "arrowup" || normalizedName === "k" ? -1 : 1;
+      if (navigation.screen === "tasks") {
+        const tasks = state.status === "ready"
+          ? state.data.tasks.filter((task) => !navigation.projectId || !task.project_id || task.project_id === navigation.projectId)
+          : [];
+        if (tasks.length > 0) {
+          setNavigation((current) => {
+            const nextIndex = (current.selectedIndex + direction + tasks.length) % tasks.length;
+            return reduceNavigation(current, { type: "select-id", id: tasks[nextIndex]?.task_id, index: nextIndex });
+          });
+        }
+        return;
+      }
       setNavigation((current) => {
         const currentIndex = screenIds.indexOf(current.screen);
         const nextScreen = screenIds[(currentIndex + direction + screenIds.length) % screenIds.length] ?? "dashboard";
