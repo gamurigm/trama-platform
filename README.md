@@ -63,6 +63,21 @@ trama audit list --json
 trama tui
 ```
 
+### TUI TypeScript
+
+Para iniciar la TUI TypeScript, levanta primero la API local y, desde la raíz
+del repositorio, ejecuta:
+
+```powershell
+.\.venv\Scripts\python.exe -m trama_platform api --host 127.0.0.1 --port 8090
+bun install --cwd tui
+bun run --cwd tui start
+```
+
+La TUI usa `TRAMA_API_URL` para seleccionar la API; si no se define, utiliza
+`http://127.0.0.1:8090`. `trama tui` permanece disponible como fallback de la
+TUI Python.
+
 El estado del control plane se guarda en `TRAMA_STATE_DIR/trama.db`. `trama
 down` solo detiene el proceso API cuyo PID fue registrado por `trama up`.
 La coordinación usa memoria local por defecto para pruebas; para despachar
