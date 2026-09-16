@@ -38,6 +38,7 @@ renew_task_lease(
 ) -> bool
 complete_task_lease(lease: TaskLease) -> bool
 release_task_lease(lease: TaskLease) -> bool
+complete_task_lease_for_task(organization_id: str, task_id: str) -> bool
 ```
 
 `claim_task` será atómico. Devuelve un lease solo si la tarea no tiene un
@@ -45,6 +46,12 @@ lease activo o si el lease anterior expiró; en caso contrario devuelve
 `None`. Todas las operaciones posteriores validarán simultáneamente la
 organización, el task ID, el owner y el token para impedir que un worker
 antiguo libere o renueve el lease de otro.
+
+El camino que persiste un resultado terminal usará
+`complete_task_lease_for_task` después de validar el namespace y guardar el
+nuevo estado de la tarea. Ese método permite que el control plane Python
+complete el lease aunque el resultado llegue a una réplica distinta de la que
+lo reclamó; no acepta un task ID sin organización.
 
 El dispatcher reclamará el lease justo antes de pasar la tarea a `running` y
 la conservará mientras la tarea siga siendo responsabilidad de ese worker.
