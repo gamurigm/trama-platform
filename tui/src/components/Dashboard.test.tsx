@@ -67,6 +67,29 @@ test("keeps the dashboard layout stable at 80 columns", async () => {
   await destroy(setup);
 });
 
+test("keeps table fields and phase counters on one line at 80 columns", async () => {
+  const setup = await renderDashboard(80);
+  const lines = setup.captureCharFrame().split("\n");
+
+  expect(lines.some((line) => line.includes("ESTADO") && line.includes("ORIGEN"))).toBe(true);
+  expect(lines.some((line) => line.includes("Run tests") && line.includes("local"))).toBe(true);
+  expect(lines.some((line) => line.includes("Diseño") && line.includes("1/2"))).toBe(true);
+  await destroy(setup);
+});
+
+test("uses blocked styling for uppercase blocked states", async () => {
+  const setup = await renderDashboard(80, {
+    ...dashboard,
+    phases: [{ ...dashboard.phases[0], status: "BLOCKED" }],
+    tasks: [{ ...dashboard.tasks[0], state: "BLOCKED" }],
+  });
+  const blockedSpans = setup.captureSpans().lines.flatMap((line) => line.spans).filter((span) => span.text.includes("!"));
+
+  expect(blockedSpans.length).toBeGreaterThan(0);
+  expect(blockedSpans.every((span) => span.fg.buffer[0] === 248 && span.fg.buffer[1] === 113 && span.fg.buffer[2] === 113)).toBe(true);
+  await destroy(setup);
+});
+
 test("keeps both panel titles visible in a narrow terminal", async () => {
   const setup = await renderDashboard(48);
   const frame = setup.captureCharFrame();
