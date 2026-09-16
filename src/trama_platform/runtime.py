@@ -19,6 +19,7 @@ from .contracts import (
     TaskLog,
     TimelineEntry,
 )
+from .leases import TaskLeaseManager, new_owner_id
 from .namespaces import can_promote, can_read_candidate
 from .observability import sanitize_message
 from .ports import CanonicalKnowledgePort, ContextMemoryPort, CoordinationPort, StateStorePort
@@ -111,6 +112,8 @@ class TramaRuntime:
         queue_capacity: int = 100,
         max_concurrency: int = 4,
         dispatch_timeout_seconds: int = 900,
+        lease_seconds: int = 60,
+        worker_id: str | None = None,
     ) -> None:
         self.coordination = coordination or InMemoryCoordination()
         self.context_memory = context_memory or InMemoryContextMemory()
@@ -125,6 +128,15 @@ class TramaRuntime:
         self._events: list[OperationEvent] = []
         self._logs: list[TaskLog] = []
         self._task_lock = RLock()
+        self.lease_manager = (
+            TaskLeaseManager(
+                state_store,
+                owner_id=worker_id or new_owner_id(),
+                lease_seconds=lease_seconds,
+            )
+            if state_store is not None
+            else None
+        )
 
         if self.state_store is not None:
             self.projects.projects.update(
@@ -162,13 +174,7 @@ class TramaRuntime:
 
         recovered_tasks: list[TaskEnvelope] = []
         for task in self.tasks.values():
-            if task.state == "running":
-                normalized = task.model_copy(update={"state": "accepted"})
-                self.tasks[task.task_id] = normalized
-                if self.state_store is not None:
-                    self.state_store.save_task(normalized)
-                recovered_tasks.append(normalized)
-            elif task.state == "accepted":
+            if task.state in {"accepted", "running"}:
                 recovered_tasks.append(task)
 
         self.dispatcher = TaskDispatcher(
@@ -177,10 +183,16 @@ class TramaRuntime:
             max_concurrency=max_concurrency,
             dispatch_timeout_seconds=dispatch_timeout_seconds,
             transition=self._transition_task,
-            current_task=self.tasks.get,
+            current_task=self._current_task_for_dispatch,
+            lease_manager=self.lease_manager,
         )
         self.dispatcher.recover(recovered_tasks)
         self._refresh_planning_state()
+
+    def _current_task_for_dispatch(self, task_id: str) -> TaskEnvelope | None:
+        self._refresh_state_catalog()
+        with self._task_lock:
+            return self.tasks.get(task_id)
 
     def _record_event(
         self,
@@ -601,6 +613,7 @@ class TramaRuntime:
         if self.state_store is not None:
             self.state_store.save_task(updated_task)
             self.state_store.save_result(result)
+        self.dispatcher.complete_task_lease(updated_task)
         task = updated_task
         self._record_event(
             action="task.result",

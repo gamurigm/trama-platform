@@ -51,6 +51,7 @@ def create_app(
         dispatch_timeout_seconds=(
             settings.dispatch_timeout_seconds if settings else 900
         ),
+        lease_seconds=settings.task_lease_seconds if settings else 60,
     )
 
     @asynccontextmanager

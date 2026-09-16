@@ -68,6 +68,7 @@ class TramaSettings:
     queue_capacity: int = 100
     max_concurrency: int = 4
     dispatch_timeout_seconds: int = 900
+    task_lease_seconds: int = 60
     semantica_kg_path: str | None = None
     utopia_url: str | None = None
     utopia_kb_id: str | None = None
@@ -122,6 +123,7 @@ class TramaSettings:
             dispatch_timeout_seconds=_read_positive_int(
                 "TRAMA_DISPATCH_TIMEOUT_SECONDS", 900
             ),
+            task_lease_seconds=_read_positive_int("TRAMA_TASK_LEASE_SECONDS", 60),
             semantica_kg_path=os.getenv("TRAMA_SEMANTICA_KG_PATH") or None,
             utopia_url=os.getenv("TRAMA_UTOPIA_URL") or None,
             utopia_kb_id=os.getenv("TRAMA_UTOPIA_KB_ID") or None,

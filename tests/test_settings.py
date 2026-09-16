@@ -97,6 +97,7 @@ def test_queue_settings_have_safe_defaults(monkeypatch):
         "TRAMA_QUEUE_CAPACITY",
         "TRAMA_MAX_CONCURRENCY",
         "TRAMA_DISPATCH_TIMEOUT_SECONDS",
+        "TRAMA_TASK_LEASE_SECONDS",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -105,11 +106,17 @@ def test_queue_settings_have_safe_defaults(monkeypatch):
     assert settings.queue_capacity == 100
     assert settings.max_concurrency == 4
     assert settings.dispatch_timeout_seconds == 900
+    assert settings.task_lease_seconds == 60
 
 
 @pytest.mark.parametrize(
     "name",
-    ["TRAMA_QUEUE_CAPACITY", "TRAMA_MAX_CONCURRENCY", "TRAMA_DISPATCH_TIMEOUT_SECONDS"],
+    [
+        "TRAMA_QUEUE_CAPACITY",
+        "TRAMA_MAX_CONCURRENCY",
+        "TRAMA_DISPATCH_TIMEOUT_SECONDS",
+        "TRAMA_TASK_LEASE_SECONDS",
+    ],
 )
 @pytest.mark.parametrize("value", ["0", "-1", "not-an-int"])
 def test_queue_settings_reject_non_positive_values(monkeypatch, name, value):
@@ -117,3 +124,11 @@ def test_queue_settings_reject_non_positive_values(monkeypatch, name, value):
 
     with pytest.raises(ValueError, match=name):
         TramaSettings.from_env()
+
+
+def test_settings_loads_task_lease_seconds(monkeypatch):
+    monkeypatch.setenv("TRAMA_TASK_LEASE_SECONDS", "45")
+
+    settings = TramaSettings.from_env()
+
+    assert settings.task_lease_seconds == 45

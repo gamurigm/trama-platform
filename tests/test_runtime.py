@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 from threading import Event, Lock
 
@@ -683,12 +684,13 @@ def test_cancelled_queued_task_is_not_dispatched():
         runtime.close()
 
 
-def test_runtime_recovers_running_task_as_accepted(tmp_path: Path):
+def test_two_runtimes_do_not_dispatch_the_same_recovered_task(tmp_path: Path):
     store = SqliteStateStore(tmp_path / "trama.db")
     first_coordination = RecordingCoordination()
     first = TramaRuntime(
         coordination=first_coordination,
         state_store=store,
+        lease_seconds=30,
         queue_capacity=1,
         max_concurrency=1,
     )
@@ -696,18 +698,78 @@ def test_runtime_recovers_running_task_as_accepted(tmp_path: Path):
     first.submit_task(task())
     assert first.wait_for_idle(timeout=2)
     assert first.tasks["task-1"].state == "running"
-    first.close()
 
     second_coordination = RecordingCoordination()
     second = TramaRuntime(
         coordination=second_coordination,
         state_store=SqliteStateStore(tmp_path / "trama.db"),
+        lease_seconds=30,
         queue_capacity=1,
         max_concurrency=1,
     )
     try:
         assert second.wait_for_idle(timeout=2)
         assert second.tasks["task-1"].state == "running"
+        assert second_coordination.seen == []
+    finally:
+        first.close()
+        second.close()
+
+
+def test_runtime_recovers_task_after_lease_expiration(tmp_path: Path):
+    database = tmp_path / "trama.db"
+    first_coordination = RecordingCoordination()
+    first = TramaRuntime(
+        coordination=first_coordination,
+        state_store=SqliteStateStore(database),
+        lease_seconds=1,
+        queue_capacity=1,
+        max_concurrency=1,
+    )
+    first.register_project(scoped_manifest())
+    first.submit_task(task())
+    assert first.wait_for_idle(timeout=2)
+    first.close()
+
+    time.sleep(1.1)
+    second_coordination = RecordingCoordination()
+    second = TramaRuntime(
+        coordination=second_coordination,
+        state_store=SqliteStateStore(database),
+        lease_seconds=1,
+        queue_capacity=1,
+        max_concurrency=1,
+    )
+    try:
+        assert second.wait_for_idle(timeout=2)
         assert second_coordination.seen == ["task-1"]
+        assert second.tasks["task-1"].state == "running"
+    finally:
+        second.close()
+
+
+def test_terminal_task_is_not_redispatched_after_restart(tmp_path: Path):
+    database = tmp_path / "trama.db"
+    first = TramaRuntime(
+        coordination=RecordingCoordination(),
+        state_store=SqliteStateStore(database),
+        lease_seconds=30,
+    )
+    first.register_project(scoped_manifest())
+    first.submit_task(task())
+    assert first.wait_for_idle(timeout=2)
+    first.record_result(AgentResult(task_id="task-1", status="succeeded", summary="ok"))
+    first.close()
+
+    second_coordination = RecordingCoordination()
+    second = TramaRuntime(
+        coordination=second_coordination,
+        state_store=SqliteStateStore(database),
+        lease_seconds=30,
+    )
+    try:
+        assert second.wait_for_idle(timeout=2)
+        assert second.tasks["task-1"].state == "succeeded"
+        assert second_coordination.seen == []
     finally:
         second.close()

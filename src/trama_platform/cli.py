@@ -400,6 +400,7 @@ def _run_control_command(args: argparse.Namespace) -> None:
             "queue_capacity": settings.queue_capacity,
             "max_concurrency": settings.max_concurrency,
             "dispatch_timeout_seconds": settings.dispatch_timeout_seconds,
+            "task_lease_seconds": settings.task_lease_seconds,
             "semantica_kg_path": settings.semantica_kg_path,
             "utopia_url": settings.utopia_url,
             "utopia_kb_id": settings.utopia_kb_id,

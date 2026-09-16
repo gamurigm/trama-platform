@@ -141,7 +141,6 @@ def test_api_restores_projects_tasks_and_events_after_runtime_restart(tmp_path):
                 "project.register",
                 "task.submit",
                 "task.dispatch",
-                "task.dispatch",
             ]
     finally:
         restarted_runtime.close()

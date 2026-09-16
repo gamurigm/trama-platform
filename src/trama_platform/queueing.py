@@ -8,6 +8,7 @@ from threading import BoundedSemaphore, Condition, Event, Lock, Thread
 from time import monotonic
 
 from .contracts import TaskEnvelope
+from .leases import TaskLease, TaskLeaseManager
 from .ports import CoordinationPort, TaskQueuePort
 
 
@@ -80,6 +81,7 @@ class TaskDispatcher:
         current_task: TaskLookup,
         dispatch_timeout_seconds: int = 900,
         queue: TaskQueuePort | None = None,
+        lease_manager: TaskLeaseManager | None = None,
     ) -> None:
         if queue_capacity < 1:
             raise ValueError("queue_capacity debe ser mayor que cero")
@@ -93,6 +95,7 @@ class TaskDispatcher:
         self.dispatch_timeout_seconds = dispatch_timeout_seconds
         self._transition = transition
         self._current_task = current_task
+        self.lease_manager = lease_manager
         self._reservations = BoundedSemaphore(queue_capacity + max_concurrency)
         self._lock = Lock()
         self._idle = Condition(self._lock)
@@ -150,31 +153,46 @@ class TaskDispatcher:
                 return
             with self._idle:
                 self._active_dispatches += 1
+            lease: TaskLease | None = None
             try:
                 current = self._current_task(task.task_id)
-                if current is None or current.state == "cancelled":
+                if current is None or current.state not in {"accepted", "running"}:
                     continue
+                if self.lease_manager is not None:
+                    lease = self.lease_manager.claim(current)
+                    if lease is None:
+                        continue
+                    self.lease_manager.start_renewal(lease)
                 running = current.model_copy(update={"state": "running"})
-                self._transition(running, "task.dispatch", "accepted", {})
                 try:
+                    self._transition(running, "task.dispatch", "accepted", {})
                     self.coordination.submit_task(running)
                 except Exception as exc:
                     failed = running.model_copy(update={"state": "failed"})
-                    self._transition(
-                        failed,
-                        "task.dispatch",
-                        "failed",
-                        {
-                            "error_type": type(exc).__name__,
-                            "message": str(exc)[:500],
-                        },
-                    )
+                    try:
+                        self._transition(
+                            failed,
+                            "task.dispatch",
+                            "failed",
+                            {
+                                "error_type": type(exc).__name__,
+                                "message": str(exc)[:500],
+                            },
+                        )
+                    finally:
+                        if lease is not None:
+                            self.lease_manager.release(lease)
             finally:
                 with self._idle:
                     self._active_dispatches -= 1
                     self._idle.notify_all()
                 self._reservations.release()
                 self.queue.task_done()
+
+    def complete_task_lease(self, task: TaskEnvelope) -> bool:
+        if self.lease_manager is None:
+            return False
+        return self.lease_manager.complete(task)
 
     def wait_for_idle(self, timeout: float) -> bool:
         deadline = monotonic() + timeout
@@ -208,5 +226,7 @@ class TaskDispatcher:
         for thread in self._threads:
             remaining = max(0.0, deadline - monotonic())
             thread.join(timeout=remaining)
+        if self.lease_manager is not None:
+            self.lease_manager.close()
         with self._lock:
             self._status = "closed"

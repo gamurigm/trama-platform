@@ -111,7 +111,7 @@ class TaskLeaseManager:
                 renewal.thread.join(timeout=1)
 
     def _renew_until_stopped(self, lease: TaskLease, stop: Event) -> None:
-        interval = max(1, self.lease_seconds // 3)
+        interval = max(0.2, self.lease_seconds / 3)
         while not stop.wait(interval):
             if not self.store.renew_task_lease(lease, lease_seconds=self.lease_seconds):
                 self._remove_if_current(lease)
