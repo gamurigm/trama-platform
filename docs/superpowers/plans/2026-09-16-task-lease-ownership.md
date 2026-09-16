@@ -58,7 +58,7 @@ def test_manager_claims_and_completes_a_task_once():
     assert store.completed == [lease]
 ```
 
-Añadir también la aserción de que un `TaskLease` exige `lease_seconds >= 1` y
+Añadir también la aserción de que un `TaskLeaseManager` exige `lease_seconds >= 1` y
 que `manager.claim` devuelve `None` cuando el store informa que otro owner
 mantiene un lease activo.
 
@@ -126,6 +126,8 @@ git commit -m "feat: definir contrato de leases de tareas"
 Crear pruebas con dos owners sobre el mismo `SqliteStateStore`:
 
 ```python
+import time
+
 def test_sqlite_claim_is_exclusive_and_expired_lease_can_be_reclaimed(tmp_path):
     store = SqliteStateStore(tmp_path / "trama.db")
     item = task("task-1", organization_id="org-a")
@@ -146,8 +148,7 @@ def test_sqlite_claim_is_exclusive_and_expired_lease_can_be_reclaimed(tmp_path):
 
 Probar también token incorrecto para renovar/completar, `release` que deja
 la fila inmediatamente reclamable y `complete_task_lease_for_task` que cierra
-el lease activo del namespace correcto. El helper de expiración será exclusivo
-de pruebas y no formará parte de `TaskLeaseStore`.
+el lease activo del namespace correcto.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -268,7 +269,6 @@ git commit -m "feat: coordinar despacho mediante leases"
 
 **Files:**
 - Modify: `src/trama_platform/worker.py`
-- Modify: `src/trama_platform/cli.py`
 - Modify: `README.md`
 - Modify: `docs/ARQUITECTURA.md`
 - Test: `tests/test_worker.py`
@@ -308,7 +308,7 @@ redelivery existente.
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add src/trama_platform/worker.py src/trama_platform/cli.py README.md docs/ARQUITECTURA.md tests/test_worker.py
+git add src/trama_platform/worker.py README.md docs/ARQUITECTURA.md tests/test_worker.py
 git commit -m "feat: activar leases y coordinacion en el worker"
 ```
 
