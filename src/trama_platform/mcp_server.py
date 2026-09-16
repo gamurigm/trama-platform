@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any, Literal
+from urllib.parse import urlencode
 
 import httpx
 from mcp.server import MCPServer
@@ -110,6 +111,9 @@ class TramaApiClient:
     def get_task(self, task_id: str) -> Any:
         return self._get(f"/v1/tasks/{task_id}")
 
+    def get_task_result(self, task_id: str) -> Any:
+        return self._get(f"/v1/tasks/{task_id}/result")
+
     def cancel_task(self, task_id: str) -> Any:
         return self._post(f"/v1/tasks/{task_id}/cancel", {})
 
@@ -122,6 +126,30 @@ class TramaApiClient:
     def list_memory_candidates(self, organization_id: str, project_id: str) -> Any:
         return self._get(
             f"/v1/memory/candidates?organization_id={organization_id}&project_id={project_id}"
+        )
+
+    def get_memory_candidate(
+        self, candidate_id: str, organization_id: str, project_id: str
+    ) -> Any:
+        query = urlencode({"organization_id": organization_id, "project_id": project_id})
+        return self._get(f"/v1/memory/candidates/{candidate_id}?{query}")
+
+    def validate_memory_candidate(
+        self, candidate_id: str, *, organization_id: str, project_id: str, reviewer: str
+    ) -> Any:
+        query = urlencode({"organization_id": organization_id, "project_id": project_id})
+        return self._post(
+            f"/v1/memory/candidates/{candidate_id}/validate?{query}",
+            {"reviewer": reviewer},
+        )
+
+    def reject_memory_candidate(
+        self, candidate_id: str, *, organization_id: str, project_id: str, reviewer: str
+    ) -> Any:
+        query = urlencode({"organization_id": organization_id, "project_id": project_id})
+        return self._post(
+            f"/v1/memory/candidates/{candidate_id}/reject?{query}",
+            {"reviewer": reviewer},
         )
 
     def list_events(self, limit: int = 100) -> Any:
@@ -487,6 +515,12 @@ def create_mcp_server(client: TramaApiClient) -> MCPServer:
         return client.record_result(result)
 
     @server.tool()
+    def trama_get_task_result(task_id: str) -> dict[str, Any]:
+        """Consulta el resultado verificable registrado para una tarea."""
+
+        return client.get_task_result(task_id)
+
+    @server.tool()
     def trama_get_overview(project_id: str | None = None) -> dict[str, Any]:
         """Consulta fases, cola CCCC, agentes y progreso para orientar a Hermes."""
 
@@ -518,6 +552,40 @@ def create_mcp_server(client: TramaApiClient) -> MCPServer:
             sensitivity=sensitivity,
         )
         return client.capture_memory(candidate)
+
+    @server.tool()
+    def trama_get_memory_candidate(
+        candidate_id: str, organization_id: str, project_id: str
+    ) -> dict[str, Any]:
+        """Consulta un candidato dentro de su namespace explícito."""
+
+        return client.get_memory_candidate(candidate_id, organization_id, project_id)
+
+    @server.tool()
+    def trama_validate_memory_candidate(
+        candidate_id: str, organization_id: str, project_id: str, reviewer: str
+    ) -> dict[str, Any]:
+        """Valida un candidato con revisión humana explícita."""
+
+        return client.validate_memory_candidate(
+            candidate_id,
+            organization_id=organization_id,
+            project_id=project_id,
+            reviewer=reviewer,
+        )
+
+    @server.tool()
+    def trama_reject_memory_candidate(
+        candidate_id: str, organization_id: str, project_id: str, reviewer: str
+    ) -> dict[str, Any]:
+        """Rechaza un candidato con revisión humana explícita."""
+
+        return client.reject_memory_candidate(
+            candidate_id,
+            organization_id=organization_id,
+            project_id=project_id,
+            reviewer=reviewer,
+        )
 
     return server
 

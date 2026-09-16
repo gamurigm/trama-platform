@@ -59,7 +59,9 @@ trama status --json
 trama doctor --json
 trama project list --json
 trama task list --json
+trama task result task-1 --json
 trama audit list --json
+trama knowledge validate candidate-1 --organization default --project demo --reviewer human --json
 trama tui
 ```
 
@@ -152,6 +154,12 @@ fase, tarea y nivel, y podar filas antiguas por proyecto. La TUI muestra la
 misma información como carriles de fases paralelas, cola de aprobación, cola
 CCCC, actividad reciente y timeline de la tarea seleccionada (`Enter`; `Esc`
 para volver).
+
+Los resultados quedan consultables con `GET /v1/tasks/{task_id}/result`. Los
+candidatos de memoria permanecen en estado `candidate` hasta una revisión
+humana explícita mediante `POST /v1/memory/candidates/{candidate_id}/validate`
+o `/reject`, siempre con `organization_id` y `project_id`; solo los candidatos
+validados pueden promoverse a conocimiento canónico.
 
 ### Planificación por requisitos
 

@@ -526,3 +526,55 @@ def test_api_exposes_plan_and_task_observability_routes():
         assert client.get("/v1/logs?project_id=demo&level=info").status_code == 200
     finally:
         runtime.close()
+
+
+def test_api_exposes_result_and_human_memory_review_flow():
+    runtime = TramaRuntime()
+    client = TestClient(create_app(runtime))
+    try:
+        assert client.post(
+            "/v1/projects", json={"project_id": "demo", "repository": "repo-a"}
+        ).status_code == 201
+        assert client.post(
+            "/v1/tasks",
+            json={
+                "task_id": "task-result",
+                "project_id": "demo",
+                "objective": "Run tests",
+                "actor": "codex",
+                "repository": "repo-a",
+                "branch": "main",
+                "worktree": "C:/work/demo",
+                "acceptance_criteria": ["tests pass"],
+            },
+        ).status_code == 202
+        assert client.post(
+            "/v1/results",
+            json={"task_id": "task-result", "status": "succeeded", "summary": "ok"},
+        ).status_code == 202
+        result = client.get("/v1/tasks/task-result/result")
+        assert result.status_code == 200
+        assert result.json()["summary"] == "ok"
+
+        candidate = {
+            "candidate_id": "candidate-review",
+            "project_id": "demo",
+            "subject": "tests",
+            "fact": "pytest passes",
+            "evidence": [{"source": "ci", "locator": "run/1"}],
+            "confidence": 1,
+        }
+        assert client.post("/v1/memory/candidates", json=candidate).status_code == 201
+        reviewed = client.post(
+            "/v1/memory/candidates/candidate-review/validate",
+            params={"organization_id": "default", "project_id": "demo"},
+            json={"reviewer": "human"},
+        )
+        assert reviewed.status_code == 200
+        assert reviewed.json()["status"] == "validated"
+        assert client.get(
+            "/v1/memory/candidates/candidate-review",
+            params={"organization_id": "default", "project_id": "demo"},
+        ).json()["status"] == "validated"
+    finally:
+        runtime.close()

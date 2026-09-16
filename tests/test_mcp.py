@@ -20,6 +20,10 @@ TOOL_NAMES = {
     "trama_record_log",
     "trama_record_result",
     "trama_capture_memory",
+    "trama_get_task_result",
+    "trama_get_memory_candidate",
+    "trama_validate_memory_candidate",
+    "trama_reject_memory_candidate",
 }
 
 
@@ -79,6 +83,32 @@ def test_api_client_adds_idempotency_key_when_submitting_to_go_gateway():
     assert seen[0].url.host == "gateway.test"
     assert seen[0].headers["idempotency-key"] == "task-1"
     assert seen[0].headers["authorization"] == "Bearer gateway-secret"
+
+
+def test_api_client_reads_results_and_reviews_memory_in_a_namespace():
+    module = importlib.import_module("trama_platform.mcp_server")
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path.endswith("/result"):
+            return httpx.Response(
+                200,
+                json={"task_id": "task-1", "status": "succeeded", "summary": "ok"},
+            )
+        return httpx.Response(200, json={"candidate_id": "candidate-1", "status": "validated"})
+
+    client = module.TramaApiClient(
+        "http://trama.test",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    assert client.get_task_result("task-1")["summary"] == "ok"
+    assert client.validate_memory_candidate(
+        "candidate-1", organization_id="org-a", project_id="demo", reviewer="human"
+    )["status"] == "validated"
+    assert seen[1].url.params["organization_id"] == "org-a"
+    assert seen[1].url.params["project_id"] == "demo"
 
 
 def test_mcp_server_exposes_only_the_scoped_trama_tools():

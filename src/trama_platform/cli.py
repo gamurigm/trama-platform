@@ -168,6 +168,9 @@ def _add_control_commands(subparsers: argparse._SubParsersAction, settings: Tram
     task_inspect = task_commands.add_parser("inspect")
     task_inspect.add_argument("task_id")
     _add_api_options(task_inspect, settings)
+    task_result = task_commands.add_parser("result")
+    task_result.add_argument("task_id")
+    _add_api_options(task_result, settings)
     for command_name in ("cancel", "retry"):
         task_transition = task_commands.add_parser(command_name)
         task_transition.add_argument("task_id")
@@ -206,6 +209,13 @@ def _add_control_commands(subparsers: argparse._SubParsersAction, settings: Tram
         candidate_command.add_argument("--organization", default=settings.organization_id)
         candidate_command.add_argument("--project", required=True)
         _add_api_options(candidate_command, settings)
+    for command_name in ("validate", "reject"):
+        review_command = knowledge_commands.add_parser(command_name)
+        review_command.add_argument("candidate_id")
+        review_command.add_argument("--reviewer", required=True)
+        review_command.add_argument("--organization", default=settings.organization_id)
+        review_command.add_argument("--project", required=True)
+        _add_api_options(review_command, settings)
     promote_command = knowledge_commands.add_parser("promote")
     promote_command.add_argument("--file", required=True)
     promote_command.add_argument("--confirm", action="store_true")
@@ -294,6 +304,8 @@ def _run_control_command(args: argparse.Namespace) -> None:
             value = client.list_tasks()
         elif args.task_command == "inspect":
             value = client.get_task(args.task_id)
+        elif args.task_command == "result":
+            value = client.get_task_result(args.task_id)
         elif args.task_command in {"cancel", "retry"}:
             if not args.confirm:
                 raise SystemExit("confirm required for task transition")
@@ -334,6 +346,20 @@ def _run_control_command(args: argparse.Namespace) -> None:
         client = TramaApiClient(args.api_url)
         if args.knowledge_command in {"candidates", "review"}:
             value = client.list_memory_candidates(args.organization, args.project)
+        elif args.knowledge_command == "validate":
+            value = client.validate_memory_candidate(
+                args.candidate_id,
+                organization_id=args.organization,
+                project_id=args.project,
+                reviewer=args.reviewer,
+            )
+        elif args.knowledge_command == "reject":
+            value = client.reject_memory_candidate(
+                args.candidate_id,
+                organization_id=args.organization,
+                project_id=args.project,
+                reviewer=args.reviewer,
+            )
         else:
             if not args.confirm:
                 raise SystemExit("confirm required for knowledge promotion")

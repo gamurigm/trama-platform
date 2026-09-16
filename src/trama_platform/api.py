@@ -144,6 +144,13 @@ def create_app(
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    @app.get("/v1/tasks/{task_id}/result", response_model=AgentResult)
+    def get_task_result(task_id: str) -> AgentResult:
+        try:
+            return app.state.runtime.get_result(task_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     @app.post("/v1/tasks/{task_id}/cancel", response_model=TaskEnvelope)
     def cancel_task(task_id: str) -> TaskEnvelope:
         try:
@@ -231,6 +238,59 @@ def create_app(
     ) -> list[MemoryCandidate]:
         try:
             return app.state.runtime.list_memory_candidates(organization_id, project_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/v1/memory/candidates/{candidate_id}", response_model=MemoryCandidate)
+    def get_memory_candidate(
+        candidate_id: str,
+        organization_id: str = Query(min_length=1),
+        project_id: str = Query(min_length=1),
+    ) -> MemoryCandidate:
+        try:
+            return app.state.runtime.get_memory_candidate(
+                candidate_id, organization_id=organization_id, project_id=project_id
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/v1/memory/candidates/{candidate_id}/validate", response_model=MemoryCandidate)
+    def validate_memory_candidate(
+        candidate_id: str,
+        payload: dict[str, str],
+        organization_id: str = Query(min_length=1),
+        project_id: str = Query(min_length=1),
+    ) -> MemoryCandidate:
+        try:
+            return app.state.runtime.review_memory_candidate(
+                candidate_id,
+                reviewer=payload.get("reviewer", ""),
+                status="validated",
+                organization_id=organization_id,
+                project_id=project_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/v1/memory/candidates/{candidate_id}/reject", response_model=MemoryCandidate)
+    def reject_memory_candidate(
+        candidate_id: str,
+        payload: dict[str, str],
+        organization_id: str = Query(min_length=1),
+        project_id: str = Query(min_length=1),
+    ) -> MemoryCandidate:
+        try:
+            return app.state.runtime.review_memory_candidate(
+                candidate_id,
+                reviewer=payload.get("reviewer", ""),
+                status="rejected",
+                organization_id=organization_id,
+                project_id=project_id,
+            )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:

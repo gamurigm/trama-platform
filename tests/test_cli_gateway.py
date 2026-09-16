@@ -232,6 +232,49 @@ def test_cli_agent_and_knowledge_commands_use_scoped_api_queries(monkeypatch, ca
     assert json.loads(capsys.readouterr().out)[0]["candidate_id"] == "candidate-1"
 
 
+def test_cli_exposes_task_result_and_memory_review(monkeypatch, capsys):
+    cli = importlib.import_module("trama_platform.cli")
+
+    class FakeClient:
+        def __init__(self, base_url):
+            pass
+
+        def get_task_result(self, task_id):
+            return {"task_id": task_id, "status": "succeeded"}
+
+        def validate_memory_candidate(self, candidate_id, *, organization_id, project_id, reviewer):
+            return {
+                "candidate_id": candidate_id,
+                "status": "validated",
+                "reviewer": reviewer,
+            }
+
+    monkeypatch.setattr(cli, "TramaApiClient", FakeClient)
+    monkeypatch.setattr(sys, "argv", ["trama", "task", "result", "task-1", "--json"])
+    cli.main()
+    assert json.loads(capsys.readouterr().out)["status"] == "succeeded"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "trama",
+            "knowledge",
+            "validate",
+            "candidate-1",
+            "--organization",
+            "org-a",
+            "--project",
+            "demo",
+            "--reviewer",
+            "human",
+            "--json",
+        ],
+    )
+    cli.main()
+    assert json.loads(capsys.readouterr().out)["status"] == "validated"
+
+
 def test_cli_mcp_model_and_config_commands_are_explicit(monkeypatch, capsys):
     cli = importlib.import_module("trama_platform.cli")
 

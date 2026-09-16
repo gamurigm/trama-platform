@@ -20,8 +20,12 @@ class HermesAdapter:
         "trama_search_context",
         "trama_submit_task",
         "trama_get_overview",
+        "trama_get_task_result",
         "trama_record_result",
         "trama_capture_memory",
+        "trama_get_memory_candidate",
+        "trama_validate_memory_candidate",
+        "trama_reject_memory_candidate",
     ]
 
     def __init__(self, executable: str = "hermes", *, cwd: str | Path | None = None) -> None:

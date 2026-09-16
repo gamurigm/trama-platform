@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from threading import RLock
+from typing import Literal
 
 from .contracts import (
     AgentResult,
@@ -119,6 +120,7 @@ class TramaRuntime:
         self.requirements: dict[str, Requirement] = {}
         self.phases: dict[str, ProjectPhase] = {}
         self.tasks: dict[str, TaskEnvelope] = {}
+        self.results: dict[str, AgentResult] = {}
         self.proposals: dict[str, PlanProposal] = {}
         self._events: list[OperationEvent] = []
         self._logs: list[TaskLog] = []
@@ -136,11 +138,13 @@ class TramaRuntime:
             )
             self.phases.update({item.phase_id: item for item in self.state_store.load_phases()})
             self.tasks.update({task.task_id: task for task in self.state_store.load_tasks()})
+            stored_results = {
+                result.task_id: result for result in self.state_store.load_results()
+            }
+            self.results.update(stored_results)
             if isinstance(self.coordination, InMemoryCoordination):
                 self.coordination.tasks.update(self.tasks)
-                self.coordination.results.update(
-                    {result.task_id: result for result in self.state_store.load_results()}
-                )
+                self.coordination.results.update(stored_results)
             if isinstance(self.context_memory, InMemoryContextMemory):
                 self.context_memory.candidates.update(
                     {
@@ -580,6 +584,7 @@ class TramaRuntime:
         if result.task_id not in self.tasks:
             raise KeyError(f"La tarea {result.task_id} no esta registrada")
         self.coordination.record_result(result)
+        self.results[result.task_id] = result
         updated_task = self.tasks[result.task_id].model_copy(
             update={"state": result.status}
         )
@@ -680,6 +685,56 @@ class TramaRuntime:
         )
         return candidate_id
 
+    def review_memory_candidate(
+        self,
+        candidate_id: str,
+        *,
+        reviewer: str,
+        status: Literal["validated", "rejected"],
+        organization_id: str | None = None,
+        project_id: str | None = None,
+    ) -> MemoryCandidate:
+        candidate = self.context_memory.get_candidate(candidate_id)
+        if candidate is None:
+            raise KeyError(f"El candidato {candidate_id} no existe")
+        if (
+            organization_id is not None and candidate.organization_id != organization_id
+        ) or (project_id is not None and candidate.project_id != project_id):
+            raise KeyError(f"El candidato {candidate_id} no existe en el namespace solicitado")
+        if not reviewer.strip():
+            raise ValueError("Se requiere un revisor")
+        if candidate.status != "candidate":
+            raise ValueError(
+                f"El candidato {candidate_id} ya fue revisado como {candidate.status}"
+            )
+        candidates = getattr(self.context_memory, "candidates", None)
+        if not isinstance(candidates, dict):
+            raise RuntimeError("El adaptador de memoria no permite revisar candidatos")
+        updated = candidate.model_copy(update={"status": status})
+        candidates[candidate_id] = updated
+        if self.state_store is not None:
+            self.state_store.save_candidate(updated)
+        action = "memory.validate" if status == "validated" else "memory.reject"
+        self._record_event(
+            action=action,
+            status="accepted",
+            organization_id=updated.organization_id,
+            project_id=updated.project_id,
+            task_id=updated.task_id,
+            correlation_id=f"memory:{candidate_id}",
+            details={"candidate_id": candidate_id, "reviewer": reviewer},
+        )
+        self._record_task_log(
+            project_id=updated.project_id,
+            organization_id=updated.organization_id,
+            task_id=updated.task_id,
+            actor=reviewer,
+            correlation_id=f"memory:{candidate_id}",
+            message=action,
+            metadata={"candidate_id": candidate_id, "reviewer": reviewer},
+        )
+        return updated
+
     def search_memory(
         self, organization_id: str, project_id: str, query: str, agent_id: str | None = None
     ) -> list[MemoryCandidate]:
@@ -777,6 +832,19 @@ class TramaRuntime:
             return self.tasks[task_id]
         except KeyError as exc:
             raise KeyError(f"La tarea {task_id} no esta registrada") from exc
+
+    def get_result(self, task_id: str) -> AgentResult:
+        result = self.results.get(task_id)
+        if result is None and self.state_store is not None:
+            result = next(
+                (item for item in self.state_store.load_results() if item.task_id == task_id),
+                None,
+            )
+            if result is not None:
+                self.results[task_id] = result
+        if result is None:
+            raise KeyError(f"El resultado de la tarea {task_id} no esta registrado")
+        return result
 
     def record_task_log(self, log: TaskLog) -> TaskLog:
         project = self.projects.get(log.project_id)
@@ -1127,6 +1195,16 @@ class TramaRuntime:
             for candidate in candidates
             if can_read_candidate(candidate, organization_id, project_id)
         ]
+
+    def get_memory_candidate(
+        self, candidate_id: str, *, organization_id: str, project_id: str
+    ) -> MemoryCandidate:
+        candidate = self.context_memory.get_candidate(candidate_id)
+        if candidate is None:
+            raise KeyError(f"El candidato {candidate_id} no existe")
+        if candidate.organization_id != organization_id or candidate.project_id != project_id:
+            raise KeyError(f"El candidato {candidate_id} no existe en el namespace solicitado")
+        return candidate
 
     def list_events(self, limit: int = 100) -> list[OperationEvent]:
         if self.state_store is not None:

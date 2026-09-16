@@ -103,6 +103,40 @@ def test_runtime_keeps_projects_and_tasks_in_their_contract_boundary():
     assert runtime.coordination.results["task-1"].status == "succeeded"
 
 
+def test_runtime_exposes_a_recorded_task_result():
+    runtime = TramaRuntime()
+    runtime.register_project(scoped_manifest())
+    runtime.submit_task(task("task-result"))
+    result = AgentResult(task_id="task-result", status="succeeded", summary="tests pass")
+
+    runtime.record_result(result)
+
+    assert runtime.get_result("task-result") == result
+
+
+def test_runtime_reviews_memory_candidate_before_promotion():
+    runtime = TramaRuntime()
+    runtime.register_project(scoped_manifest())
+    candidate = MemoryCandidate(
+        candidate_id="candidate-review",
+        organization_id="org-a",
+        project_id="demo",
+        subject="tests",
+        fact="pytest passes",
+        evidence=[Evidence(source="ci", locator="run/1")],
+        confidence=1,
+    )
+    runtime.capture_memory(candidate)
+
+    reviewed = runtime.review_memory_candidate(
+        "candidate-review", reviewer="human", status="validated"
+    )
+
+    assert reviewed.status == "validated"
+    assert runtime.context_memory.get_candidate("candidate-review") == reviewed
+    assert runtime.list_events()[-1].action == "memory.validate"
+
+
 def test_runtime_requires_registered_project():
     runtime = TramaRuntime()
     task = TaskEnvelope(
