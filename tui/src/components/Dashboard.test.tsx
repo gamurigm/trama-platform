@@ -307,6 +307,19 @@ test("leaves Tasks at the list boundaries with arrow keys", async () => {
   await destroy(setup as never);
 });
 
+test("keeps screen navigation available when Tasks is empty", async () => {
+  const client = { getDashboard: async () => ({ ...appDashboard, tasks: [] }) };
+  const setup = await renderApp(client, 100);
+  await act(async () => { await setup.waitForFrame((frame) => frame.includes("TRAMA  ·  Dashboard")); });
+  await act(async () => { setup.mockInput.pressArrow("down"); });
+  await setup.waitForFrame((frame) => frame.includes("TRAMA  ·  Projects"));
+  await act(async () => { setup.mockInput.pressArrow("down"); });
+  await setup.waitForFrame((frame) => frame.includes("TRAMA  ·  Tasks"));
+  await act(async () => { setup.mockInput.pressArrow("up"); });
+  await setup.waitForFrame((frame) => frame.includes("TRAMA  ·  Projects"));
+  await destroy(setup as never);
+});
+
 test("shows the shell title and keyboard hints at a narrow width", async () => {
   const client = { getDashboard: async () => appDashboard };
   const setup = await renderApp(client, 48);

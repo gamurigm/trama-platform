@@ -177,15 +177,16 @@ export function App({ client, pollMs = 2000 }: { client: TramaApiClient; pollMs?
           const tasks = state.status === "ready"
             ? state.data.tasks.filter((task) => !task.project_id || !current.projectId || task.project_id === current.projectId)
             : [];
-          if (tasks.length === 0) return current;
-          const atBoundary = direction < 0 ? current.selectedIndex === 0 : current.selectedIndex === tasks.length - 1;
-          if (atBoundary) {
-            const currentIndex = screenIds.indexOf(current.screen);
-            const nextScreen = screenIds[(currentIndex + direction + screenIds.length) % screenIds.length] ?? "dashboard";
-            return reduceNavigation(current, { type: "open-screen", screen: nextScreen });
+          if (tasks.length > 0) {
+            const atBoundary = direction < 0 ? current.selectedIndex === 0 : current.selectedIndex === tasks.length - 1;
+            if (atBoundary) {
+              const currentIndex = screenIds.indexOf(current.screen);
+              const nextScreen = screenIds[(currentIndex + direction + screenIds.length) % screenIds.length] ?? "dashboard";
+              return reduceNavigation(current, { type: "open-screen", screen: nextScreen });
+            }
+            const nextIndex = (current.selectedIndex + direction + tasks.length) % tasks.length;
+            return reduceNavigation(current, { type: "select-id", id: tasks[nextIndex]?.task_id, index: nextIndex });
           }
-          const nextIndex = (current.selectedIndex + direction + tasks.length) % tasks.length;
-          return reduceNavigation(current, { type: "select-id", id: tasks[nextIndex]?.task_id, index: nextIndex });
         }
         const currentIndex = screenIds.indexOf(current.screen);
         const nextScreen = screenIds[(currentIndex + direction + screenIds.length) % screenIds.length] ?? "dashboard";
