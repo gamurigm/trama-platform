@@ -1,0 +1,17 @@
+{{- if .Values.pythonWorker.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "trama-gateway.fullname" . }}-python-state
+  labels:
+    {{- include "trama-gateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: python-worker
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ .Values.pythonWorker.persistence.size }}
+  {{ if .Values.pythonWorker.persistence.storageClassName }}
+  storageClassName: {{ .Values.pythonWorker.persistence.storageClassName | quote }}
+  {{ end }}
+{{- end }}

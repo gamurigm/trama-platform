@@ -1,0 +1,77 @@
+gateway:
+  replicaCount: 3
+  image:
+    repository: ghcr.io/your-org/trama-gateway
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8080
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+  rateLimit: 2000
+  rateWindowMs: 1000
+  databaseMaxOpenConns: 64
+  databaseMaxIdleConns: 16
+
+outbox:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/your-org/trama-outbox
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+pythonWorker:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/your-org/trama-platform
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  stateDir: /data/state
+  durableName: trama-python-dispatch
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClassName: ""
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+secrets:
+  existingSecret: trama-gateway-secrets
+  databaseURLKey: database-url
+  redisURLKey: redis-url
+  natsURLKey: nats-url
+  oidcIssuerKey: oidc-issuer
+  oidcAudienceKey: oidc-audience
+  serviceAccountTokenKey: service-account-token
+  serviceAccountOrganizationKey: service-account-organization
+
+auth:
+  required: true
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2

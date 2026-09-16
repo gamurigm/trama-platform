@@ -52,12 +52,14 @@ class InMemoryContextMemory(ContextMemoryPort):
     def get_candidate(self, candidate_id: str) -> MemoryCandidate | None:
         return self.candidates.get(candidate_id)
 
-    def search(self, organization_id: str, project_id: str, query: str) -> list[MemoryCandidate]:
+    def search(
+        self, organization_id: str, project_id: str, query: str, agent_id: str | None = None
+    ) -> list[MemoryCandidate]:
         normalized = query.casefold()
         return [
             candidate
             for candidate in self.candidates.values()
-            if can_read_candidate(candidate, organization_id, project_id)
+            if can_read_candidate(candidate, organization_id, project_id, agent_id)
             and normalized in f"{candidate.subject} {candidate.fact}".casefold()
         ]
 
@@ -679,12 +681,12 @@ class TramaRuntime:
         return candidate_id
 
     def search_memory(
-        self, organization_id: str, project_id: str, query: str
+        self, organization_id: str, project_id: str, query: str, agent_id: str | None = None
     ) -> list[MemoryCandidate]:
         project = self.projects.get(project_id)
         if organization_id != project.organization_id:
             raise ValueError("La organizacion de la busqueda no coincide con el proyecto")
-        return list(self.context_memory.search(organization_id, project_id, query))
+        return list(self.context_memory.search(organization_id, project_id, query, agent_id))
 
     def promote(self, request: PromotionRequest) -> str:
         candidate = self.context_memory.get_candidate(request.candidate_id)

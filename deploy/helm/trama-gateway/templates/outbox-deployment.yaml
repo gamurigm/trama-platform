@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "trama-gateway.fullname" . }}-outbox
+  labels:
+    {{- include "trama-gateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: outbox
+spec:
+  replicas: {{ .Values.outbox.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "trama-gateway.name" . }}
+      app.kubernetes.io/component: outbox
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "trama-gateway.labels" . | nindent 8 }}
+        app.kubernetes.io/component: outbox
+    spec:
+      containers:
+        - name: outbox
+          image: "{{ .Values.outbox.image.repository }}:{{ .Values.outbox.image.tag }}"
+          imagePullPolicy: {{ .Values.outbox.image.pullPolicy }}
+          env:
+            - name: TRAMA_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: {{ .Values.secrets.databaseURLKey }}
+            - name: TRAMA_NATS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: {{ .Values.secrets.natsURLKey }}
+          resources:
+            {{- toYaml .Values.outbox.resources | nindent 12 }}

@@ -208,6 +208,9 @@ class MemoryCandidate(TramaContract):
     candidate_id: str = Field(min_length=1, max_length=200)
     organization_id: str = Field(default="default", min_length=1, max_length=100)
     project_id: str = Field(min_length=1, max_length=100)
+    agent_id: str | None = Field(default=None, max_length=100)
+    task_id: str | None = Field(default=None, max_length=100)
+    source: str = Field(default="trama", min_length=1, max_length=500)
     subject: str = Field(min_length=1, max_length=500)
     fact: str = Field(min_length=1, max_length=10000)
     evidence: list[Evidence] = Field(min_length=1, max_length=100)
@@ -227,6 +230,7 @@ class MemoryCandidate(TramaContract):
 class MemorySearchRequest(TramaContract):
     organization_id: str = Field(default="default", min_length=1, max_length=100)
     project_id: str = Field(min_length=1, max_length=100)
+    agent_id: str | None = Field(default=None, max_length=100)
     query: str = Field(min_length=1, max_length=1000)
 
 

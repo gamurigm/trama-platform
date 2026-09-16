@@ -1,0 +1,119 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "phase_id": {
+      "maxLength": 100,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Phase Id",
+      "type": "string"
+    },
+    "requirement_id": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Requirement Id",
+      "type": "string"
+    },
+    "organization_id": {
+      "default": "default",
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Organization Id",
+      "type": "string"
+    },
+    "project_id": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Project Id",
+      "type": "string"
+    },
+    "name": {
+      "maxLength": 300,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "sequence": {
+      "maximum": 1000,
+      "minimum": 1,
+      "title": "Sequence",
+      "type": "integer"
+    },
+    "depends_on": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100,
+      "title": "Depends On",
+      "type": "array"
+    },
+    "acceptance_criteria": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100,
+      "minItems": 1,
+      "title": "Acceptance Criteria",
+      "type": "array"
+    },
+    "status": {
+      "default": "planned",
+      "enum": [
+        "planned",
+        "ready",
+        "in_progress",
+        "completed",
+        "blocked"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "correlation_id": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Correlation Id"
+    },
+    "approved_by": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Approved By"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "phase_id",
+    "requirement_id",
+    "project_id",
+    "name",
+    "sequence",
+    "acceptance_criteria"
+  ],
+  "title": "ProjectPhase",
+  "type": "object"
+}

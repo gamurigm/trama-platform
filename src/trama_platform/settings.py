@@ -43,12 +43,28 @@ class TramaSettings:
     api_host: str = "127.0.0.1"
     api_port: int = 8090
     api_url: str = "http://127.0.0.1:8090"
+    api_token: str | None = None
+    gateway_url: str | None = None
+    gateway_token: str | None = None
     coordination_backend: str = "memory"
     cccc_executable: str = "cccc"
     cccc_timeout_seconds: int = 30
     queue_capacity: int = 100
     max_concurrency: int = 4
     dispatch_timeout_seconds: int = 900
+    semantica_url: str | None = None
+    semantica_kg_path: str | None = None
+    semantica_vector_backend: str = "inmemory"
+    semantica_vector_dimension: int = 768
+    utopia_url: str | None = None
+    utopia_kb_id: str | None = None
+    external_token: str | None = None
+    colibri_url: str | None = None
+    colibri_model: str | None = None
+    nats_url: str = "nats://127.0.0.1:4222"
+    nats_stream: str = "TRAMA_EVENTS"
+    nats_subject: str = "trama.task.admitted.v1"
+    nats_durable: str = "trama-python-dispatch"
     hermes_executable: str = "hermes"
     hermes_config_path: str = "~/.hermes/config.yaml"
 
@@ -67,6 +83,9 @@ class TramaSettings:
             api_host=api_host,
             api_port=api_port,
             api_url=os.getenv("TRAMA_API_URL", f"http://{api_host}:{api_port}"),
+            api_token=os.getenv("TRAMA_API_TOKEN") or None,
+            gateway_url=os.getenv("TRAMA_GATEWAY_URL") or None,
+            gateway_token=os.getenv("TRAMA_GATEWAY_TOKEN") or None,
             coordination_backend=os.getenv("TRAMA_COORDINATION_BACKEND", "memory"),
             cccc_executable=os.getenv("TRAMA_CCCC_EXECUTABLE", "cccc"),
             cccc_timeout_seconds=_read_int("TRAMA_CCCC_TIMEOUT_SECONDS", 30),
@@ -75,6 +94,19 @@ class TramaSettings:
             dispatch_timeout_seconds=_read_positive_int(
                 "TRAMA_DISPATCH_TIMEOUT_SECONDS", 900
             ),
+            semantica_url=os.getenv("TRAMA_SEMANTICA_URL") or None,
+            semantica_kg_path=os.getenv("TRAMA_SEMANTICA_KG_PATH") or None,
+            semantica_vector_backend=os.getenv("TRAMA_SEMANTICA_VECTOR_BACKEND", "inmemory"),
+            semantica_vector_dimension=_read_positive_int("TRAMA_SEMANTICA_VECTOR_DIMENSION", 768),
+            utopia_url=os.getenv("TRAMA_UTOPIA_URL") or None,
+            utopia_kb_id=os.getenv("TRAMA_UTOPIA_KB_ID") or None,
+            external_token=os.getenv("TRAMA_EXTERNAL_TOKEN") or None,
+            colibri_url=os.getenv("TRAMA_COLIBRI_URL") or None,
+            colibri_model=os.getenv("TRAMA_COLIBRI_MODEL") or None,
+            nats_url=os.getenv("TRAMA_NATS_URL", "nats://127.0.0.1:4222"),
+            nats_stream=os.getenv("TRAMA_NATS_STREAM", "TRAMA_EVENTS"),
+            nats_subject=os.getenv("TRAMA_NATS_SUBJECT", "trama.task.admitted.v1"),
+            nats_durable=os.getenv("TRAMA_NATS_DURABLE", "trama-python-dispatch"),
             hermes_executable=os.getenv("TRAMA_HERMES_EXECUTABLE", "hermes"),
             hermes_config_path=os.getenv(
                 "TRAMA_HERMES_CONFIG_PATH", _default_hermes_config_path()

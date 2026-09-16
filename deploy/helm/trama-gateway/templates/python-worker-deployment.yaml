@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "trama-gateway.fullname" . }}-python-worker
+  labels:
+    {{- include "trama-gateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: python-worker
+spec:
+  replicas: {{ .Values.pythonWorker.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "trama-gateway.name" . }}
+      app.kubernetes.io/component: python-worker
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "trama-gateway.labels" . | nindent 8 }}
+        app.kubernetes.io/component: python-worker
+    spec:
+      containers:
+        - name: python-worker
+          image: "{{ .Values.pythonWorker.image.repository }}:{{ .Values.pythonWorker.image.tag }}"
+          imagePullPolicy: {{ .Values.pythonWorker.image.pullPolicy }}
+          command: ["trama", "worker"]
+          env:
+            - name: TRAMA_ENV
+              value: prod
+            - name: TRAMA_STATE_DIR
+              value: {{ .Values.pythonWorker.stateDir | quote }}
+            - name: TRAMA_NATS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: {{ .Values.secrets.natsURLKey }}
+            - name: TRAMA_NATS_DURABLE
+              value: {{ .Values.pythonWorker.durableName | quote }}
+          volumeMounts:
+            - name: state
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.pythonWorker.resources | nindent 12 }}
+      volumes:
+        - name: state
+          {{ if .Values.pythonWorker.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "trama-gateway.fullname" . }}-python-state
+          {{ else }}
+          emptyDir: {}
+          {{ end }}

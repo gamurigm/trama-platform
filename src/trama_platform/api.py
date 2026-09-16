@@ -240,7 +240,10 @@ def create_app(
     def search_memory(request: MemorySearchRequest) -> list[MemoryCandidate]:
         try:
             return app.state.runtime.search_memory(
-                request.organization_id, request.project_id, request.query
+                request.organization_id,
+                request.project_id,
+                request.query,
+                request.agent_id,
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

@@ -101,6 +101,19 @@ def test_coordination_factory_builds_cccc_adapter():
     assert adapter.timeout_seconds == 17
 
 
+def test_external_factories_reject_undocumented_semantica_http_and_require_utopia_scope():
+    cli = importlib.import_module("trama_platform.cli")
+    settings = cli.TramaSettings(
+        semantica_url="https://semantica.test",
+        utopia_url="https://utopia.test",
+        external_token="secret",
+    )
+
+    assert cli.build_context_memory(settings) is None
+    with pytest.raises(ValueError, match="TRAMA_UTOPIA_KB_ID"):
+        cli.build_canonical_knowledge(settings)
+
+
 def test_cli_hermes_check_emits_adapter_status(monkeypatch, capsys):
     cli = importlib.import_module("trama_platform.cli")
 
@@ -247,6 +260,47 @@ def test_cli_mcp_model_and_config_commands_are_explicit(monkeypatch, capsys):
     assert config["queue_capacity"] == 100
     assert config["max_concurrency"] == 4
     assert config["dispatch_timeout_seconds"] == 900
+
+
+def test_cli_config_never_emits_external_token(monkeypatch, capsys):
+    cli = importlib.import_module("trama_platform.cli")
+    monkeypatch.setenv("TRAMA_SEMANTICA_URL", "http://127.0.0.1:8101")
+    monkeypatch.setenv("TRAMA_EXTERNAL_TOKEN", "do-not-print")
+    monkeypatch.setenv("TRAMA_GATEWAY_TOKEN", "gateway-secret-do-not-print")
+    monkeypatch.setattr(sys, "argv", ["trama", "config", "get", "--json"])
+
+    cli.main()
+
+    output = capsys.readouterr().out
+    assert "do-not-print" not in output
+    assert "gateway-secret-do-not-print" not in output
+    assert "semantica_url" in output
+
+
+def test_cli_config_exposes_colibri_endpoint_without_a_secret(monkeypatch, capsys):
+    cli = importlib.import_module("trama_platform.cli")
+    monkeypatch.setenv("TRAMA_COLIBRI_URL", "http://127.0.0.1:8000")
+    monkeypatch.setenv("TRAMA_COLIBRI_MODEL", "glm-local")
+    monkeypatch.setattr(sys, "argv", ["trama", "config", "get", "--json"])
+
+    cli.main()
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["colibri_url"] == "http://127.0.0.1:8000"
+    assert output["colibri_model"] == "glm-local"
+
+
+def test_cli_worker_starts_the_durable_python_task_consumer(monkeypatch):
+    cli = importlib.import_module("trama_platform.cli")
+    captured = []
+
+    monkeypatch.setattr(cli, "run_task_worker", lambda settings: captured.append(settings))
+    monkeypatch.setenv("TRAMA_NATS_URL", "nats://nats.test:4222")
+    monkeypatch.setattr(sys, "argv", ["trama", "worker"])
+
+    cli.main()
+
+    assert captured[0].nats_url == "nats://nats.test:4222"
 
 
 def test_cli_api_passes_queue_settings_to_app(monkeypatch, tmp_path):

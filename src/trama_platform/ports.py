@@ -120,7 +120,7 @@ class ContextMemoryPort(Protocol):
     def get_candidate(self, candidate_id: str) -> MemoryCandidate | None: ...
 
     def search(
-        self, organization_id: str, project_id: str, query: str
+        self, organization_id: str, project_id: str, query: str, agent_id: str | None = None
     ) -> Sequence[MemoryCandidate]: ...
 
 

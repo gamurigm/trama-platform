@@ -17,12 +17,21 @@ def artifact_namespace(organization_id: str, project_id: str, task_id: str) -> s
     return f"artifacts/{organization_id}/{project_id}/{task_id}"
 
 
-def can_read_candidate(candidate: MemoryCandidate, organization_id: str, project_id: str) -> bool:
+def can_read_candidate(
+    candidate: MemoryCandidate,
+    organization_id: str,
+    project_id: str,
+    agent_id: str | None = None,
+) -> bool:
     if candidate.organization_id != organization_id:
         return False
     if candidate.visibility == "shared":
         return True
-    return candidate.project_id == project_id and candidate.visibility == "project"
+    if candidate.project_id != project_id:
+        return False
+    if candidate.visibility == "project":
+        return True
+    return candidate.visibility == "private" and candidate.agent_id == agent_id
 
 
 def can_promote(request: PromotionRequest, candidate: MemoryCandidate) -> bool:

@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "trama-gateway.fullname" . }}
+  labels:
+    {{- include "trama-gateway.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.gateway.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "trama-gateway.name" . }}
+      app.kubernetes.io/component: gateway
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "trama-gateway.labels" . | nindent 8 }}
+        app.kubernetes.io/component: gateway
+    spec:
+      containers:
+        - name: gateway
+          image: "{{ .Values.gateway.image.repository }}:{{ .Values.gateway.image.tag }}"
+          imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: TRAMA_GATEWAY_ADDR
+              value: ":8080"
+            - name: TRAMA_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: {{ .Values.secrets.databaseURLKey }}
+            - name: TRAMA_DATABASE_MAX_OPEN_CONNS
+              value: {{ .Values.gateway.databaseMaxOpenConns | quote }}
+            - name: TRAMA_DATABASE_MAX_IDLE_CONNS
+              value: {{ .Values.gateway.databaseMaxIdleConns | quote }}
+            - name: TRAMA_REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: {{ .Values.secrets.redisURLKey }}
+            - name: TRAMA_NATS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: {{ .Values.secrets.natsURLKey }}
+            - name: TRAMA_GATEWAY_RATE_LIMIT
+              value: {{ .Values.gateway.rateLimit | quote }}
+            - name: TRAMA_GATEWAY_RATE_WINDOW_MS
+              value: {{ .Values.gateway.rateWindowMs | quote }}
+            - name: TRAMA_GATEWAY_AUTH_REQUIRED
+              value: {{ .Values.auth.required | quote }}
+            - name: TRAMA_GATEWAY_OIDC_ISSUER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: {{ .Values.secrets.oidcIssuerKey }}
+                  optional: true
+            - name: TRAMA_GATEWAY_OIDC_AUDIENCE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: {{ .Values.secrets.oidcAudienceKey }}
+                  optional: true
+            - name: TRAMA_GATEWAY_SERVICE_ACCOUNT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: {{ .Values.secrets.serviceAccountTokenKey }}
+                  optional: true
+            - name: TRAMA_GATEWAY_SERVICE_ACCOUNT_ORGANIZATION
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: {{ .Values.secrets.serviceAccountOrganizationKey }}
+                  optional: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}

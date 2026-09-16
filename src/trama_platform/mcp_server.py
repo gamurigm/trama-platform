@@ -407,11 +407,17 @@ def create_mcp_server(client: TramaApiClient) -> MCPServer:
         organization_id: str,
         project_id: str,
         query: str,
+        agent_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Busca memoria visible dentro del namespace solicitado."""
 
         return client.search_memory(
-            {"organization_id": organization_id, "project_id": project_id, "query": query}
+            {
+                "organization_id": organization_id,
+                "project_id": project_id,
+                "agent_id": agent_id,
+                "query": query,
+            }
         )
 
     @server.tool()

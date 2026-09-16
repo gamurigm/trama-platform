@@ -27,6 +27,75 @@
       "default": null,
       "title": "Parent Task Id"
     },
+    "requirement_id": {
+      "anyOf": [
+        {
+          "maxLength": 100,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Requirement Id"
+    },
+    "phase_id": {
+      "anyOf": [
+        {
+          "maxLength": 100,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Phase Id"
+    },
+    "source": {
+      "default": "manual",
+      "enum": [
+        "manual",
+        "requirement"
+      ],
+      "title": "Source",
+      "type": "string"
+    },
+    "correlation_id": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Correlation Id"
+    },
+    "depends_on": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100,
+      "title": "Depends On",
+      "type": "array"
+    },
+    "approved_by": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Approved By"
+    },
     "organization_id": {
       "default": "default",
       "maxLength": 100,
@@ -86,6 +155,7 @@
     "state": {
       "default": "accepted",
       "enum": [
+        "planned",
         "accepted",
         "running",
         "succeeded",

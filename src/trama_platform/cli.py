@@ -19,20 +19,28 @@ from .contracts import (
     ModelRequest,
     OperationEvent,
     ProjectManifest,
+    ProjectPhase,
     PromotionRequest,
+    Requirement,
     TaskEnvelope,
     ToolInvocation,
 )
 from .hermes import HermesAdapter
+from .http_adapters import SemanticaHttpAdapter, UtopiaHttpAdapter
+from .semantica_adapter import SemanticaContextAdapter
+from .utopia_mcp import UtopiaMcpAdapter
 from .lifecycle import GatewaySupervisor
 from .mcp_server import TramaApiClient, TramaApiError, run_mcp
 from .ports import CoordinationPort
 from .project import load_project_manifest
 from .settings import TramaSettings
 from .state_store import SqliteStateStore
+from .worker import run_task_worker
 
 CONTRACTS = {
     "project-manifest": ProjectManifest,
+    "requirement": Requirement,
+    "project-phase": ProjectPhase,
     "task-envelope": TaskEnvelope,
     "agent-result": AgentResult,
     "memory-candidate": MemoryCandidate,
@@ -81,6 +89,43 @@ def build_coordination(settings: TramaSettings) -> CoordinationPort | None:
         )
     raise ValueError(
         "TRAMA_COORDINATION_BACKEND debe ser 'memory' o 'cccc'"
+    )
+
+
+def build_context_memory(settings: TramaSettings):
+    if settings.semantica_kg_path is None:
+        return None
+    try:
+        from semantica.context import AgentContext, ContextGraph
+        from semantica.vector_store import VectorStore
+    except ImportError as exc:
+        raise RuntimeError(
+            "Semantica nativa requiere instalar el paquete semantica; "
+            "TRAMA_SEMANTICA_URL no es un endpoint soportado"
+        ) from exc
+    context = AgentContext(
+        vector_store=VectorStore(
+            backend=settings.semantica_vector_backend,
+            dimension=settings.semantica_vector_dimension,
+        ),
+        knowledge_graph=ContextGraph(advanced_analytics=True),
+        decision_tracking=True,
+    )
+    context.load(settings.semantica_kg_path)
+    return SemanticaContextAdapter(context)
+
+
+def build_canonical_knowledge(settings: TramaSettings):
+    if settings.utopia_url is None and settings.utopia_kb_id is None:
+        return None
+    if not settings.utopia_url or not settings.utopia_kb_id or not settings.external_token:
+        raise ValueError(
+            "Utopia requiere TRAMA_UTOPIA_URL, TRAMA_UTOPIA_KB_ID y TRAMA_EXTERNAL_TOKEN"
+        )
+    return UtopiaMcpAdapter(
+        settings.utopia_url,
+        settings.utopia_kb_id,
+        token=settings.external_token,
     )
 
 
@@ -139,6 +184,7 @@ def _add_control_commands(subparsers: argparse._SubParsersAction, settings: Tram
     context_search = context_commands.add_parser("search")
     context_search.add_argument("--organization", default=settings.organization_id)
     context_search.add_argument("--project", required=True)
+    context_search.add_argument("--agent")
     context_search.add_argument("query")
     _add_api_options(context_search, settings)
 
@@ -172,6 +218,10 @@ def _add_control_commands(subparsers: argparse._SubParsersAction, settings: Tram
     config_get.add_argument("--key")
     config_get.add_argument("--json", action="store_true", dest="as_json")
 
+    subparsers.add_parser(
+        "worker", help="Consume tareas admitidas por el gateway Go mediante NATS"
+    )
+
     hermes_parser = subparsers.add_parser("hermes", help="Opera la integracion local de Hermes")
     hermes_commands = hermes_parser.add_subparsers(dest="hermes_command", required=True)
     hermes_check = hermes_commands.add_parser("check")
@@ -186,6 +236,10 @@ def _add_control_commands(subparsers: argparse._SubParsersAction, settings: Tram
 
 
 def _run_control_command(args: argparse.Namespace) -> None:
+    if args.command == "worker":
+        run_task_worker(TramaSettings.from_env())
+        return
+
     if args.command in {"up", "down"}:
         settings = TramaSettings.from_env()
         command = [
@@ -261,6 +315,7 @@ def _run_control_command(args: argparse.Namespace) -> None:
                 {
                     "organization_id": args.organization,
                     "project_id": args.project,
+                    "agent_id": args.agent,
                     "query": args.query,
                 }
             ),
@@ -306,12 +361,27 @@ def _run_control_command(args: argparse.Namespace) -> None:
             "api_host": settings.api_host,
             "api_port": settings.api_port,
             "api_url": settings.api_url,
+            "api_token_configured": bool(settings.api_token),
+            "gateway_url": settings.gateway_url,
+            "gateway_token_configured": bool(settings.gateway_token),
             "coordination_backend": settings.coordination_backend,
             "cccc_executable": settings.cccc_executable,
             "cccc_timeout_seconds": settings.cccc_timeout_seconds,
             "queue_capacity": settings.queue_capacity,
             "max_concurrency": settings.max_concurrency,
             "dispatch_timeout_seconds": settings.dispatch_timeout_seconds,
+            "semantica_url": settings.semantica_url,
+            "semantica_kg_path": settings.semantica_kg_path,
+            "semantica_vector_backend": settings.semantica_vector_backend,
+            "semantica_vector_dimension": settings.semantica_vector_dimension,
+            "utopia_url": settings.utopia_url,
+            "utopia_kb_id": settings.utopia_kb_id,
+            "colibri_url": settings.colibri_url,
+            "colibri_model": settings.colibri_model,
+            "nats_url": settings.nats_url,
+            "nats_stream": settings.nats_stream,
+            "nats_subject": settings.nats_subject,
+            "nats_durable": settings.nats_durable,
             "hermes_executable": settings.hermes_executable,
             "hermes_config_path": settings.hermes_config_path,
         }
@@ -342,6 +412,7 @@ def main() -> None:
 
     mcp_parser = subparsers.add_parser("mcp", help="Inicia o comprueba el servidor MCP")
     mcp_parser.add_argument("--api-url", default=settings.api_url)
+    mcp_parser.add_argument("--gateway-url", default=settings.gateway_url)
     mcp_commands = mcp_parser.add_subparsers(dest="mcp_command")
     mcp_check = mcp_commands.add_parser("check")
     _add_api_options(mcp_check, settings)
@@ -365,6 +436,8 @@ def main() -> None:
         uvicorn.run(
             create_app(
                 coordination=build_coordination(settings),
+                context_memory=build_context_memory(settings),
+                canonical_knowledge=build_canonical_knowledge(settings),
                 state_store=state_store,
                 settings=settings,
             ),
@@ -383,7 +456,14 @@ def main() -> None:
                 as_json=args.as_json,
             )
         else:
-            run_mcp(args.api_url)
+            if args.gateway_url:
+                run_mcp(
+                    args.api_url,
+                    gateway_url=args.gateway_url,
+                    gateway_token=settings.gateway_token,
+                )
+            else:
+                run_mcp(args.api_url)
     elif args.command in {
         "up",
         "down",
@@ -398,6 +478,7 @@ def main() -> None:
         "knowledge",
         "model",
         "config",
+        "worker",
     }:
         _run_control_command(args)
     elif args.command == "tui":

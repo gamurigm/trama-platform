@@ -1,0 +1,113 @@
+name: trama-gateway
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: trama
+      POSTGRES_USER: trama
+      POSTGRES_PASSWORD: trama-local-only
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../gateway/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trama -d trama"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  nats:
+    image: nats:2.11-alpine
+    command: ["-js", "-sd", "/data"]
+    ports:
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
+    volumes:
+      - nats-data:/data
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+
+  gateway:
+    build:
+      context: ..
+      dockerfile: gateway/Dockerfile
+      args:
+        TRAMA_BINARY: trama-gateway
+    environment:
+      TRAMA_GATEWAY_ADDR: ":8080"
+      TRAMA_DATABASE_URL: postgresql://trama:trama-local-only@postgres:5432/trama?sslmode=disable
+      TRAMA_REDIS_URL: redis://redis:6379/0
+      TRAMA_GATEWAY_RATE_LIMIT: "2000"
+      TRAMA_GATEWAY_RATE_WINDOW_MS: "1000"
+      TRAMA_NATS_URL: nats://nats:4222
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  outbox:
+    build:
+      context: ..
+      dockerfile: gateway/Dockerfile
+      args:
+        TRAMA_BINARY: trama-outbox
+    environment:
+      TRAMA_DATABASE_URL: postgresql://trama:trama-local-only@postgres:5432/trama?sslmode=disable
+      TRAMA_NATS_URL: nats://nats:4222
+      TRAMA_OUTBOX_BATCH_SIZE: "100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  control-plane:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    environment:
+      TRAMA_ENV: prod
+      TRAMA_API_HOST: 0.0.0.0
+      TRAMA_API_PORT: "8090"
+      TRAMA_STATE_DIR: /data/state
+    ports:
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - python-state:/data/state
+    restart: unless-stopped
+
+  python-worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["trama", "worker"]
+    environment:
+      TRAMA_ENV: prod
+      TRAMA_STATE_DIR: /data/state
+      TRAMA_NATS_URL: nats://nats:4222
+      TRAMA_NATS_STREAM: TRAMA_EVENTS
+      TRAMA_NATS_SUBJECT: trama.task.admitted.v1
+      TRAMA_NATS_DURABLE: trama-python-dispatch
+    volumes:
+      - python-state:/data/state
+    depends_on:
+      outbox:
+        condition: service_started
+      control-plane:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  nats-data:
+  redis-data:
+  python-state:
