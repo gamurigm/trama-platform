@@ -7,9 +7,13 @@ from trama_platform.contracts import (
     AgentResult,
     Evidence,
     MemoryCandidate,
+    PlanProposal,
     ProjectManifest,
+    ProjectPhase,
     PromotionRequest,
+    Requirement,
     TaskEnvelope,
+    TaskLog,
 )
 from trama_platform.queueing import QueueCapacityError
 from trama_platform.runtime import TramaRuntime
@@ -264,6 +268,271 @@ def test_runtime_persists_task_before_dispatch(tmp_path: Path):
         runtime.close()
 
 
+def test_runtime_requires_phase_and_task_approval_before_dispatching_derived_tasks():
+    coordination = RecordingCoordination()
+    runtime = TramaRuntime(coordination=coordination)
+    try:
+        runtime.register_project(scoped_manifest())
+        runtime.register_requirement(
+            Requirement(
+                requirement_id="REQ-1",
+                organization_id="org-a",
+                project_id="demo",
+                title="Feature",
+                description="Feature description",
+                acceptance_criteria=["works"],
+            )
+        )
+        runtime.register_phase(
+            ProjectPhase(
+                phase_id="REQ-1:build",
+                requirement_id="REQ-1",
+                organization_id="org-a",
+                project_id="demo",
+                name="Build",
+                sequence=1,
+                acceptance_criteria=["build passes"],
+            )
+        )
+        planned = task("REQ-1:build:1").model_copy(
+            update={
+                "requirement_id": "REQ-1",
+                "phase_id": "REQ-1:build",
+                "source": "requirement",
+                "state": "planned",
+            }
+        )
+        runtime.submit_task(planned)
+        assert coordination.seen == []
+        assert runtime.tasks[planned.task_id].state == "planned"
+
+        runtime.approve_phase("REQ-1:build", approver="human")
+        runtime.approve_task(planned.task_id, approver="human")
+        assert runtime.wait_for_idle(timeout=2)
+        assert coordination.seen == [planned.task_id]
+        assert runtime.tasks[planned.task_id].state == "running"
+    finally:
+        runtime.close()
+
+
+def test_runtime_overview_groups_phase_progress_queue_and_agents():
+    runtime = TramaRuntime()
+    try:
+        runtime.register_project(scoped_manifest())
+        runtime.register_requirement(
+            Requirement(
+                requirement_id="REQ-1",
+                organization_id="org-a",
+                project_id="demo",
+                title="Feature",
+                description="Feature description",
+                acceptance_criteria=["works"],
+            )
+        )
+        runtime.register_phase(
+            ProjectPhase(
+                phase_id="REQ-1:build",
+                requirement_id="REQ-1",
+                organization_id="org-a",
+                project_id="demo",
+                name="Build",
+                sequence=1,
+                acceptance_criteria=["build passes"],
+            )
+        )
+        runtime.approve_phase("REQ-1:build", approver="human")
+        runtime.submit_task(
+            task("REQ-1:build:1").model_copy(
+                update={
+                    "requirement_id": "REQ-1",
+                    "phase_id": "REQ-1:build",
+                    "source": "requirement",
+                }
+            )
+        )
+        overview = runtime.overview("demo")
+        assert overview["phases"][0]["completed_tasks"] == 0
+        assert overview["phases"][0]["total_tasks"] == 1
+        assert overview["queue"][0]["task_id"] == "REQ-1:build:1"
+        assert overview["agents"][0]["agent_id"] == "codex"
+    finally:
+        runtime.close()
+
+
+def test_independent_approved_phases_can_run_in_parallel():
+    runtime = TramaRuntime()
+    try:
+        runtime.register_project(manifest())
+        runtime.register_requirement(
+            Requirement(
+                requirement_id="REQ-1",
+                project_id="demo",
+                title="Feature",
+                description="Feature description",
+                acceptance_criteria=["works"],
+            )
+        )
+        for phase_id, name in (("REQ-1:api", "API"), ("REQ-1:tui", "TUI")):
+            runtime.register_phase(
+                ProjectPhase(
+                    phase_id=phase_id,
+                    requirement_id="REQ-1",
+                    project_id="demo",
+                    name=name,
+                    sequence=1,
+                    acceptance_criteria=["ready"],
+                )
+            )
+            assert runtime.approve_phase(phase_id, approver="human").status == "ready"
+        assert {phase.status for phase in runtime.list_phases("demo")} == {"ready"}
+    finally:
+        runtime.close()
+
+
+def test_dependent_phase_waits_until_its_phase_dependency_completes():
+    runtime = TramaRuntime()
+    try:
+        runtime.register_project(scoped_manifest())
+        runtime.register_requirement(
+            Requirement(
+                requirement_id="REQ-1",
+                organization_id="org-a",
+                project_id="demo",
+                title="Feature",
+                description="Feature description",
+                acceptance_criteria=["works"],
+            )
+        )
+        runtime.register_phase(
+            ProjectPhase(
+                phase_id="REQ-1:api",
+                requirement_id="REQ-1",
+                organization_id="org-a",
+                project_id="demo",
+                name="API",
+                sequence=1,
+                acceptance_criteria=["api ready"],
+            )
+        )
+        runtime.register_phase(
+            ProjectPhase(
+                phase_id="REQ-1:tui",
+                requirement_id="REQ-1",
+                organization_id="org-a",
+                project_id="demo",
+                name="TUI",
+                sequence=2,
+                depends_on=["REQ-1:api"],
+                acceptance_criteria=["tui ready"],
+            )
+        )
+        assert runtime.approve_phase("REQ-1:api", approver="human").status == "ready"
+        assert runtime.approve_phase("REQ-1:tui", approver="human").status == "planned"
+        phase_task = task("REQ-1:api:1").model_copy(
+            update={"requirement_id": "REQ-1", "phase_id": "REQ-1:api"}
+        )
+        runtime.submit_task(phase_task)
+        runtime.record_result(
+            AgentResult(task_id=phase_task.task_id, status="succeeded", summary="ok")
+        )
+        assert runtime.phases["REQ-1:api"].status == "completed"
+        assert runtime.phases["REQ-1:tui"].status == "ready"
+    finally:
+        runtime.close()
+
+
+def test_runtime_correlates_plan_logs_and_parallel_overview(tmp_path: Path):
+    runtime = TramaRuntime(state_store=SqliteStateStore(tmp_path / "trama.db"))
+    try:
+        runtime.register_project(scoped_manifest())
+        runtime.register_requirement(
+            Requirement(
+                requirement_id="REQ-OBS",
+                organization_id="org-a",
+                project_id="demo",
+                title="Observabilidad",
+                description="Ver timeline",
+                acceptance_criteria=["timeline visible"],
+            )
+        )
+        for phase_id, name, depends_on in (
+            ("REQ-OBS:api", "API", []),
+            ("REQ-OBS:tui", "TUI", []),
+            ("REQ-OBS:docs", "Docs", ["REQ-OBS:api"]),
+        ):
+            runtime.register_phase(
+                ProjectPhase(
+                    phase_id=phase_id,
+                    requirement_id="REQ-OBS",
+                    organization_id="org-a",
+                    project_id="demo",
+                    name=name,
+                    sequence=len(runtime.phases) + 1,
+                    depends_on=depends_on,
+                    acceptance_criteria=["ready"],
+                )
+            )
+        api_task = task("REQ-OBS:api:1").model_copy(
+            update={
+                "requirement_id": "REQ-OBS",
+                "phase_id": "REQ-OBS:api",
+                "source": "requirement",
+                "state": "planned",
+                "correlation_id": "corr-obs",
+            }
+        )
+        tui_task = task("REQ-OBS:tui:1").model_copy(
+            update={
+                "requirement_id": "REQ-OBS",
+                "phase_id": "REQ-OBS:tui",
+                "source": "requirement",
+                "state": "planned",
+                "correlation_id": "corr-obs",
+            }
+        )
+        runtime.submit_task(api_task)
+        runtime.submit_task(tui_task)
+        proposal = PlanProposal(
+            proposal_id="plan-obs",
+            requirement_id="REQ-OBS",
+            organization_id="org-a",
+            project_id="demo",
+            model_profile="codex-planner",
+            phase_ids=["REQ-OBS:api", "REQ-OBS:tui", "REQ-OBS:docs"],
+            task_ids=[api_task.task_id, tui_task.task_id],
+            summary="Plan paralelo",
+            correlation_id="corr-obs",
+        )
+
+        runtime.register_plan_proposal(proposal)
+        runtime.approve_plan("plan-obs", approver="human")
+        runtime.record_task_log(
+            TaskLog(
+                organization_id="org-a",
+                project_id="demo",
+                requirement_id="REQ-OBS",
+                phase_id="REQ-OBS:api",
+                task_id=api_task.task_id,
+                actor="cccc",
+                correlation_id="corr-obs",
+                message="handoff",
+                sequence=1,
+            )
+        )
+
+        overview = runtime.overview("demo")
+        timeline = runtime.task_timeline(api_task.task_id)
+
+        assert overview["parallel_groups"] == [
+            {"phase_ids": ["REQ-OBS:api", "REQ-OBS:tui"]}
+        ]
+        assert "REQ-OBS:docs" in overview["blocked_dependencies"]
+        assert [entry.kind for entry in timeline][-1] == "log"
+        assert all(entry.correlation_id == "corr-obs" for entry in timeline)
+    finally:
+        runtime.close()
+
+
 def test_runtime_does_not_mutate_state_when_capacity_is_exhausted():
     runtime, coordination = runtime_with_blocking_coordination(
         queue_capacity=1,
@@ -311,6 +580,40 @@ def test_runtime_does_not_enqueue_an_identical_task_twice():
         assert [event.action for event in runtime.list_events()].count("task.submit") == 1
     finally:
         runtime.close()
+
+
+def test_runtime_can_ingest_a_task_already_admitted_by_the_go_gateway():
+    coordination = RecordingCoordination()
+    runtime = TramaRuntime(coordination=coordination)
+    try:
+        runtime.register_project(scoped_manifest())
+        item = task("gateway-task")
+
+        assert runtime.accept_admitted_task(item) == "gateway-task"
+        assert runtime.accept_admitted_task(item) == "gateway-task"
+        assert runtime.wait_for_idle(timeout=2)
+        assert coordination.seen == ["gateway-task"]
+        assert [event.action for event in runtime.list_events()].count("task.ingest") == 1
+    finally:
+        runtime.close()
+
+
+def test_runtime_refreshes_projects_written_by_the_control_api_process(tmp_path: Path):
+    database = tmp_path / "trama.db"
+    worker_runtime = TramaRuntime(
+        coordination=RecordingCoordination(),
+        state_store=SqliteStateStore(database),
+    )
+    try:
+        SqliteStateStore(database).save_project(scoped_manifest())
+
+        assert (
+            worker_runtime.accept_admitted_task(task("cross-process-task"))
+            == "cross-process-task"
+        )
+        assert worker_runtime.wait_for_idle(timeout=2)
+    finally:
+        worker_runtime.close()
 
 
 def test_cancelled_queued_task_is_not_dispatched():

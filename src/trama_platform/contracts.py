@@ -71,6 +71,7 @@ class Requirement(TramaContract):
     kind: Literal["feature", "change", "module", "refactor", "bugfix"] = "feature"
     acceptance_criteria: list[str] = Field(min_length=1, max_length=100)
     status: RequirementStatus = "proposed"
+    correlation_id: str | None = Field(default=None, max_length=200)
     created_at: datetime = Field(default_factory=utc_now)
 
 
@@ -85,6 +86,7 @@ class ProjectPhase(TramaContract):
     depends_on: list[str] = Field(default_factory=list, max_length=100)
     acceptance_criteria: list[str] = Field(min_length=1, max_length=100)
     status: PhaseStatus = "planned"
+    correlation_id: str | None = Field(default=None, max_length=200)
     approved_by: str | None = Field(default=None, max_length=200)
     created_at: datetime = Field(default_factory=utc_now)
 
@@ -104,6 +106,7 @@ class TaskEnvelope(TramaContract):
     requirement_id: str | None = Field(default=None, max_length=100)
     phase_id: str | None = Field(default=None, max_length=100)
     source: TaskSource = "manual"
+    correlation_id: str | None = Field(default=None, max_length=200)
     depends_on: list[str] = Field(default_factory=list, max_length=100)
     approved_by: str | None = Field(default=None, max_length=200)
     organization_id: str = Field(default="default", min_length=1, max_length=100)

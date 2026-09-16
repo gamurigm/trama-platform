@@ -7,13 +7,19 @@ from typing import Protocol
 
 from .contracts import (
     AgentResult,
+    LogLevel,
     MemoryCandidate,
     ModelRequest,
     ModelResult,
     OperationEvent,
+    PlanProposal,
     ProjectManifest,
+    ProjectPhase,
     PromotionRequest,
+    Requirement,
     TaskEnvelope,
+    TaskLog,
+    TimelineEntry,
     ToolInvocation,
     ToolResult,
 )
@@ -23,6 +29,18 @@ class StateStorePort(Protocol):
     def save_project(self, project: ProjectManifest) -> None: ...
 
     def load_projects(self) -> Sequence[ProjectManifest]: ...
+
+    def save_requirement(self, requirement: Requirement) -> None: ...
+
+    def load_requirements(self) -> Sequence[Requirement]: ...
+
+    def save_plan_proposal(self, proposal: PlanProposal) -> None: ...
+
+    def load_plan_proposals(self) -> Sequence[PlanProposal]: ...
+
+    def save_phase(self, phase: ProjectPhase) -> None: ...
+
+    def load_phases(self) -> Sequence[ProjectPhase]: ...
 
     def save_task(self, task: TaskEnvelope) -> None: ...
 
@@ -49,6 +67,31 @@ class StateStorePort(Protocol):
     def count(self, kind: str) -> int: ...
 
     def count_events(self) -> int: ...
+
+    def append_task_log(self, log: TaskLog) -> None: ...
+
+    def list_task_logs(
+        self,
+        *,
+        organization_id: str | None = None,
+        project_id: str | None = None,
+        task_id: str | None = None,
+        phase_id: str | None = None,
+        requirement_id: str | None = None,
+        level: LogLevel | None = None,
+        limit: int = 100,
+    ) -> Sequence[TaskLog]: ...
+
+    def count_task_logs(
+        self,
+        *,
+        organization_id: str | None = None,
+        project_id: str | None = None,
+        task_id: str | None = None,
+        phase_id: str | None = None,
+        requirement_id: str | None = None,
+        level: LogLevel | None = None,
+    ) -> int: ...
 
 
 class CoordinationPort(Protocol):
@@ -91,3 +134,9 @@ class ToolGatewayPort(Protocol):
 
 class ModelGatewayPort(Protocol):
     def complete(self, request: ModelRequest) -> ModelResult: ...
+
+
+class TimelinePort(Protocol):
+    def task_timeline(self, task_id: str, limit: int = 100) -> Sequence[TimelineEntry]: ...
+
+    def phase_timeline(self, phase_id: str, limit: int = 100) -> Sequence[TimelineEntry]: ...
