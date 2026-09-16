@@ -3,6 +3,7 @@ import type {
   DashboardData,
   HealthStatus,
   LogQuery,
+  MemoryCandidate,
   OperationEvent,
   Overview,
   Phase,
@@ -159,6 +160,18 @@ function timeline(value: Record<string, unknown>, endpoint: string): TimelineEnt
   return value as TimelineEntry;
 }
 
+function memoryCandidate(value: Record<string, unknown>, endpoint: string): MemoryCandidate {
+  requiredString(value, "candidate_id", endpoint);
+  requiredString(value, "project_id", endpoint);
+  requiredString(value, "subject", endpoint);
+  requiredString(value, "fact", endpoint);
+  optionalString(value, "agent_id", endpoint);
+  optionalString(value, "status", endpoint);
+  optionalNumber(value, "confidence", endpoint);
+  optionalString(value, "created_at", endpoint);
+  return value as MemoryCandidate;
+}
+
 function requiredNumber(value: Record<string, unknown>, field: string, endpoint: string): void {
   if (typeof value[field] !== "number") {
     invalidPayload(endpoint, `Expected ${field} to be a number`);
@@ -215,6 +228,16 @@ export class TramaApiClient {
   async getHealth(): Promise<HealthStatus> {
     const endpoint = "/health";
     return health(await this.getObject(endpoint), endpoint);
+  }
+
+  async listAgents(): Promise<Agent[]> {
+    const endpoint = "/v1/agents";
+    return collection(await this.getJson(endpoint), "agents", endpoint, agent);
+  }
+
+  async listMemoryCandidates(organizationId: string, projectId: string): Promise<MemoryCandidate[]> {
+    const endpoint = addQuery("/v1/memory/candidates", [["organization_id", organizationId], ["project_id", projectId]]);
+    return collection(await this.getJson(endpoint), "memory", "/v1/memory/candidates", memoryCandidate);
   }
 
   async listEvents(limit = 100): Promise<OperationEvent[]> {

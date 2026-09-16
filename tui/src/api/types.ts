@@ -116,6 +116,25 @@ export type LogQuery = {
   limit?: number;
 };
 
+export type MemoryCandidate = {
+  candidate_id: string;
+  project_id: string;
+  subject: string;
+  fact: string;
+  confidence?: number;
+  status?: string;
+  agent_id?: string;
+  created_at?: string;
+};
+
+export type Worker = {
+  worker_id: string;
+  status?: string;
+  active?: number;
+  capacity?: number;
+  last_seen_at?: string;
+};
+
 export type Overview = {
   phases?: Phase[];
   queue?: Task[];
@@ -127,4 +146,16 @@ export type DashboardData = {
   phases: Phase[];
   agents: Agent[];
   tasks: Task[];
+};
+
+export type ScreenData = {
+  projects?: ProjectManifest[];
+  tasks?: Task[];
+  agents?: Agent[];
+  status?: Status;
+  health?: HealthStatus;
+  events?: OperationEvent[];
+  logs?: TaskLog[];
+  memory?: MemoryCandidate[];
+  workers?: Worker[];
 };

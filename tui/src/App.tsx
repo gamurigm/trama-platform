@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
 import { StatusBar } from "./components/StatusBar";
 import type { DashboardData } from "./api/types";
+import type { ScreenData } from "./api/types";
 import type { TramaApiClient } from "./api/client";
 import { initialNavigation, reduceNavigation } from "./navigation/reducer";
 import type { ScreenId } from "./navigation/model";
@@ -10,6 +11,14 @@ import { NavigationRail, screenIds, screenTitles } from "./screens/NavigationRai
 import { CommandPalette, type PaletteCommand } from "./ui/CommandPalette";
 import { KeyHints } from "./ui/KeyHints";
 import { colors } from "./ui/tokens";
+import { ProjectsScreen } from "./screens/ProjectsScreen";
+import { TasksScreen } from "./screens/TasksScreen";
+import { AgentsScreen } from "./screens/AgentsScreen";
+import { QueuesScreen } from "./screens/QueuesScreen";
+import { WorkersScreen } from "./screens/WorkersScreen";
+import { EventsScreen } from "./screens/EventsScreen";
+import { MemoryScreen } from "./screens/MemoryScreen";
+import { HealthScreen } from "./screens/HealthScreen";
 
 type AppState =
   | { status: "loading" }
@@ -20,6 +29,7 @@ export function App({ client, pollMs = 2000 }: { client: TramaApiClient; pollMs?
   const renderer = useRenderer();
   const { width } = useTerminalDimensions();
   const [state, setState] = useState<AppState>({ status: "loading" });
+  const [screenData, setScreenData] = useState<ScreenData>({});
   const [navigation, setNavigation] = useState(initialNavigation);
   const requestInFlight = useRef(false);
 
@@ -41,6 +51,40 @@ export function App({ client, pollMs = 2000 }: { client: TramaApiClient; pollMs?
     const interval = setInterval(() => void refresh(), pollMs);
     return () => clearInterval(interval);
   }, [pollMs, refresh]);
+
+  useEffect(() => {
+    if (navigation.screen === "dashboard") return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        if (navigation.screen === "projects") {
+          const projects = await client.listProjects();
+          if (!cancelled) setScreenData((current) => ({ ...current, projects }));
+        } else if (navigation.screen === "agents") {
+          const agents = await client.listAgents();
+          if (!cancelled) setScreenData((current) => ({ ...current, agents }));
+        } else if (navigation.screen === "events") {
+          const events = await client.listEvents();
+          if (!cancelled) setScreenData((current) => ({ ...current, events }));
+        } else if (navigation.screen === "memory") {
+          if (!navigation.projectId) return;
+          const projects = await client.listProjects();
+          const project = projects.find((item) => item.project_id === navigation.projectId);
+          if (project) {
+            const memory = await client.listMemoryCandidates(project.organization_id ?? "default", project.project_id);
+            if (!cancelled) setScreenData((current) => ({ ...current, memory, projects }));
+          }
+        } else if (navigation.screen === "health") {
+          const health = await client.getHealth();
+          if (!cancelled) setScreenData((current) => ({ ...current, health }));
+        }
+      } catch (error) {
+        if (!cancelled) setScreenData((current) => ({ ...current, logs: [{ message: error instanceof Error ? error.message : String(error), project_id: navigation.projectId ?? "", correlation_id: "screen-load" }] }));
+      }
+    };
+    void load();
+    return () => { cancelled = true; };
+  }, [client, navigation.projectId, navigation.screen]);
 
   useKeyboard((key) => {
     const name = String(key.name);
@@ -80,6 +124,16 @@ export function App({ client, pollMs = 2000 }: { client: TramaApiClient; pollMs?
     { id: "quit", label: "Salir" },
   ];
   const screen = navigation.screen;
+  const routedData: ScreenData = { ...screenData, tasks: state.data.tasks, agents: state.data.agents, status: state.data.status };
+
+  const operationalScreen = screen === "projects" ? <ProjectsScreen projectId={navigation.projectId} data={routedData} selectedId={navigation.selectedId} />
+    : screen === "tasks" ? <TasksScreen projectId={navigation.projectId} data={routedData} selectedId={navigation.selectedId} />
+      : screen === "agents" ? <AgentsScreen projectId={navigation.projectId} data={routedData} selectedId={navigation.selectedId} />
+        : screen === "queues" ? <QueuesScreen projectId={navigation.projectId} data={routedData} />
+          : screen === "workers" ? <WorkersScreen projectId={navigation.projectId} data={routedData} />
+            : screen === "events" ? <EventsScreen projectId={navigation.projectId} data={routedData} selectedId={navigation.selectedId} />
+              : screen === "memory" ? <MemoryScreen projectId={navigation.projectId} data={routedData} selectedId={navigation.selectedId} />
+                : <HealthScreen projectId={navigation.projectId} data={routedData} />;
 
   return (
     <box flexDirection="column" width="100%" height="100%">
@@ -92,9 +146,7 @@ export function App({ client, pollMs = 2000 }: { client: TramaApiClient; pollMs?
         {screen === "dashboard" ? (
           <DashboardScreen data={state.data} stacked={stacked} />
         ) : (
-          <box flexGrow={1} border borderStyle="single" title={screenTitles[screen]} padding={1}>
-            <text fg={colors.muted}>Vista {screenTitles[screen]} disponible en el siguiente módulo.</text>
-          </box>
+          operationalScreen
         )}
       </box>
       <box border borderStyle="single" paddingLeft={1} paddingRight={1}>
