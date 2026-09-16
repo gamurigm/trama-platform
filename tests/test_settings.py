@@ -25,16 +25,24 @@ def test_settings_loads_api_and_cccc_values_from_environment(monkeypatch):
     assert settings.cccc_timeout_seconds == 45
 
 
-def test_settings_loads_optional_external_memory_urls(monkeypatch):
-    monkeypatch.setenv("TRAMA_SEMANTICA_URL", "https://semantica.test")
+def test_settings_loads_only_required_memory_integration_vars(monkeypatch):
+    monkeypatch.setenv("TRAMA_SEMANTICA_URL", "https://ignored.test")
+    monkeypatch.setenv("TRAMA_SEMANTICA_VECTOR_BACKEND", "faiss")
+    monkeypatch.setenv("TRAMA_SEMANTICA_VECTOR_DIMENSION", "1536")
+    monkeypatch.setenv("TRAMA_EXTERNAL_TOKEN", "ignored-token")
+    monkeypatch.setenv("TRAMA_SEMANTICA_KG_PATH", "artifacts/semantica-context")
     monkeypatch.setenv("TRAMA_UTOPIA_URL", "https://utopia.test")
-    monkeypatch.setenv("TRAMA_EXTERNAL_TOKEN", "token")
+    monkeypatch.setenv("TRAMA_UTOPIA_KB_ID", "kb-test")
+    monkeypatch.setenv("TRAMA_UTOPIA_TOKEN", "token")
 
     settings = TramaSettings.from_env()
 
-    assert settings.semantica_url == "https://semantica.test"
+    assert settings.semantica_kg_path == "artifacts/semantica-context"
     assert settings.utopia_url == "https://utopia.test"
-    assert settings.external_token == "token"
+    assert settings.utopia_kb_id == "kb-test"
+    assert settings.utopia_token == "token"
+    assert not hasattr(settings, "semantica_url")
+    assert not hasattr(settings, "external_token")
 
 
 def test_settings_loads_optional_colibri_profile(monkeypatch):

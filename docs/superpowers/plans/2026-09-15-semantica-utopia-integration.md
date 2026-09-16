@@ -30,27 +30,27 @@
 
 **Files:** `src/trama_platform/semantica_adapter.py`, `tests/test_semantica_adapter.py`, `src/trama_platform/cli.py`, `pyproject.toml`
 
-- [ ] Write failing tests for storing metadata-rich facts, scoped retrieval, and candidate lookup.
-- [ ] Run the focused tests and confirm the adapter is missing.
-- [ ] Implement an injected `AgentContext` adapter using `store` and `retrieve`, with no hard dependency at import time.
-- [ ] Wire it behind `TRAMA_SEMANTICA_MODE` and retain local fallback.
-- [ ] Run focused tests.
+- [x] Write failing tests for storing metadata-rich facts, scoped retrieval, and candidate lookup.
+- [x] Run the focused tests and confirm the adapter is missing.
+- [x] Implement an injected `AgentContext` adapter using `store` and `retrieve`, with no hard dependency at import time.
+- [x] Wire it behind `TRAMA_SEMANTICA_KG_PATH` and retain local fallback.
+- [x] Run focused tests.
 
 ### Task 3: Utopia MCP adapter
 
 **Files:** `src/trama_platform/utopia_mcp.py`, `tests/test_utopia_mcp.py`, `src/trama_platform/settings.py`, `src/trama_platform/cli.py`
 
-- [ ] Write failing tests for configurable MCP tool calls, approval payloads, scoped search, and error translation.
-- [ ] Run focused tests and confirm the adapter is missing.
-- [ ] Implement a synchronous callable-based MCP bridge so TRAMA does not depend on a particular MCP client event loop.
-- [ ] Add configuration for command, base/scope, search tool, and proposal tool.
-- [ ] Run focused tests.
+- [x] Write failing tests for configurable MCP tool calls, approval payloads, scoped search, and error translation.
+- [x] Run focused tests and confirm the adapter is missing.
+- [x] Implement a synchronous callable-based MCP bridge so TRAMA does not depend on a particular MCP client event loop.
+- [x] Add configuration for base URL, knowledge-base ID, and PAT.
+- [x] Run focused tests.
 
 ### Task 4: Runtime/API integration and documentation
 
 **Files:** `src/trama_platform/runtime.py`, `src/trama_platform/api.py`, `README.md`, `docs/ARQUITECTURA.md`, `.env.example`, tests
 
-- [ ] Add failing integration tests proving agent/task provenance and Utopia publication only after validation.
-- [ ] Wire the adapters without changing the public TRAMA ports.
-- [ ] Update setup instructions for the two upstream repositories and remove claims about unsupported endpoints.
-- [ ] Run the full Python suite and record unrelated baseline failures separately.
+- [x] Add failing integration tests proving agent/task provenance and Utopia publication only after validation.
+- [x] Wire the adapters without changing the public TRAMA ports.
+- [x] Update setup instructions for the two upstream repositories and remove claims about unsupported endpoints.
+- [x] Run the full Python suite and record unrelated baseline failures separately.

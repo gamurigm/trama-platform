@@ -101,15 +101,13 @@ def test_coordination_factory_builds_cccc_adapter():
     assert adapter.timeout_seconds == 17
 
 
-def test_external_factories_reject_undocumented_semantica_http_and_require_utopia_scope():
+def test_external_factories_require_complete_utopia_configuration():
     cli = importlib.import_module("trama_platform.cli")
     settings = cli.TramaSettings(
-        semantica_url="https://semantica.test",
         utopia_url="https://utopia.test",
-        external_token="secret",
+        utopia_token="secret",
     )
 
-    assert cli.build_context_memory(settings) is None
     with pytest.raises(ValueError, match="TRAMA_UTOPIA_KB_ID"):
         cli.build_canonical_knowledge(settings)
 
@@ -264,8 +262,9 @@ def test_cli_mcp_model_and_config_commands_are_explicit(monkeypatch, capsys):
 
 def test_cli_config_never_emits_external_token(monkeypatch, capsys):
     cli = importlib.import_module("trama_platform.cli")
-    monkeypatch.setenv("TRAMA_SEMANTICA_URL", "http://127.0.0.1:8101")
-    monkeypatch.setenv("TRAMA_EXTERNAL_TOKEN", "do-not-print")
+    monkeypatch.setenv("TRAMA_UTOPIA_URL", "http://127.0.0.1:1516")
+    monkeypatch.setenv("TRAMA_UTOPIA_KB_ID", "kb-test")
+    monkeypatch.setenv("TRAMA_UTOPIA_TOKEN", "do-not-print")
     monkeypatch.setenv("TRAMA_GATEWAY_TOKEN", "gateway-secret-do-not-print")
     monkeypatch.setattr(sys, "argv", ["trama", "config", "get", "--json"])
 
@@ -274,7 +273,8 @@ def test_cli_config_never_emits_external_token(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert "do-not-print" not in output
     assert "gateway-secret-do-not-print" not in output
-    assert "semantica_url" in output
+    assert "semantica_url" not in output
+    assert "utopia_token" not in output
 
 
 def test_cli_config_exposes_colibri_endpoint_without_a_secret(monkeypatch, capsys):

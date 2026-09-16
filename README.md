@@ -178,9 +178,10 @@ ejecuta como máximo `TRAMA_MAX_CONCURRENCY` despachos simultáneos y devuelve
 HTTP 429 con código `queue_full` cuando no puede admitir otra tarea. Esta cola
 no es un broker compartido entre procesos; configura sus límites con
 `TRAMA_QUEUE_CAPACITY`, `TRAMA_MAX_CONCURRENCY` y
-`TRAMA_DISPATCH_TIMEOUT_SECONDS`. Los puertos de contexto y conocimiento todavía
-usan implementaciones locales por defecto; Semantica y Utopia se conectarán como
-adaptadores externos sin convertirlos en dependencias obligatorias de TRAMA.
+`TRAMA_DISPATCH_TIMEOUT_SECONDS`. Los puertos de contexto y conocimiento usan
+implementaciones locales por defecto. Semantica se conecta nativamente como
+`AgentContext` de Python; Utopia se conecta por el endpoint MCP HTTP de una base
+de conocimiento. Ambas integraciones son opcionales.
 
 En el modo distribuido, `POST /v1/tasks` entra al gateway Go con una operación
 transaccional de PostgreSQL (admisión, proyección read-your-write y outbox).
@@ -190,16 +191,32 @@ ocurre después de que Python persiste y entrega la tarea a CCCC. Redis comparte
 el rate limit entre réplicas. Para producción, configura OIDC/JWKS o una cuenta
 de servicio y usa el chart Helm de `deploy/helm/trama-gateway`.
 
-Para conectar servicios HTTP locales o remotos, configura opcionalmente
-`TRAMA_SEMANTICA_URL`, `TRAMA_UTOPIA_URL` y `TRAMA_EXTERNAL_TOKEN`. Por ejemplo:
+Para usar Semantica en el worker Python, instala la integración y configura un
+directorio absoluto de persistencia:
 
 ```powershell
-$env:TRAMA_SEMANTICA_URL = "http://127.0.0.1:8101"
-$env:TRAMA_UTOPIA_URL = "http://127.0.0.1:8102"
-$env:TRAMA_EXTERNAL_TOKEN = "token-local"
+uv sync --extra integrations
+$env:TRAMA_SEMANTICA_KG_PATH = "C:\data\trama\semantica-context"
 ```
 
-Si las URLs no están definidas, TRAMA conserva las implementaciones locales.
+Semantica recomienda `AgentContext` nativo para código Python. Su servidor MCP
+`semantica-mcp` es `stdio` local para clientes MCP y no es un servicio REST;
+TRAMA no intenta conectarse a él por URL.
+
+Para usar Utopia, inicia su aplicación y crea una PAT con permiso `read` o
+`write` según corresponda. Configura la URL del servidor, el ID de la base y el
+token:
+
+```powershell
+$env:TRAMA_UTOPIA_URL = "http://127.0.0.1:1516"
+$env:TRAMA_UTOPIA_KB_ID = "<knowledge-base-uuid>"
+$env:TRAMA_UTOPIA_TOKEN = "utp_pat_..."
+```
+
+Utopia se consulta con `search_chunks` y registra propuestas con `remember` en
+`/api/v1/kbs/{kb_id}/mcp`. `remember` deja los hechos en la cola de revisión;
+no significa que el grafo canónico haya sido modificado. Si no se configura la
+base externa, TRAMA conserva las implementaciones locales.
 Usa HTTPS para servicios remotos.
 
 ## Agentes locales y Colibri
@@ -245,8 +262,8 @@ validación. Los esquemas JSON se pueden exportar con:
 ## Alcance inicial
 
 Esta primera base implementa contratos, namespaces, registro de proyectos,
-runtime local, API y adaptador CCCC. Semantica, Utopia, MCP y Model Gateway
-quedan desacoplados detrás de puertos explícitos; el puente MCP para Hermes
-reenvía las operaciones a la API. Ningún fallo de un adaptador
+runtime local, API y adaptador CCCC. Semantica nativa, Utopia MCP, MCP y Model
+Gateway quedan desacoplados detrás de puertos explícitos; el puente MCP para
+Hermes reenvía las operaciones a la API. Ningún fallo de un adaptador
 externo debe impedir que un proyecto ejecute sus pruebas o genere sus propios
 artefactos.

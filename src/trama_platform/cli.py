@@ -26,15 +26,14 @@ from .contracts import (
     ToolInvocation,
 )
 from .hermes import HermesAdapter
-from .http_adapters import SemanticaHttpAdapter, UtopiaHttpAdapter
-from .semantica_adapter import SemanticaContextAdapter
-from .utopia_mcp import UtopiaMcpAdapter
 from .lifecycle import GatewaySupervisor
 from .mcp_server import TramaApiClient, TramaApiError, run_mcp
 from .ports import CoordinationPort
 from .project import load_project_manifest
+from .semantica_adapter import SemanticaContextAdapter
 from .settings import TramaSettings
 from .state_store import SqliteStateStore
+from .utopia_mcp import UtopiaMcpAdapter
 from .worker import run_task_worker
 
 CONTRACTS = {
@@ -50,6 +49,11 @@ CONTRACTS = {
     "model-request": ModelRequest,
     "operation-event": OperationEvent,
 }
+
+# Valores internos mínimos requeridos por AgentContext; no son opciones de
+# despliegue y por eso no se exponen como variables de entorno.
+SEMANTICA_VECTOR_BACKEND = "inmemory"
+SEMANTICA_VECTOR_DIMENSION = 768
 
 
 def _export_schemas(destination: Path) -> None:
@@ -101,12 +105,12 @@ def build_context_memory(settings: TramaSettings):
     except ImportError as exc:
         raise RuntimeError(
             "Semantica nativa requiere instalar el paquete semantica; "
-            "TRAMA_SEMANTICA_URL no es un endpoint soportado"
+            "instala la dependencia opcional 'integrations'"
         ) from exc
     context = AgentContext(
         vector_store=VectorStore(
-            backend=settings.semantica_vector_backend,
-            dimension=settings.semantica_vector_dimension,
+            backend=SEMANTICA_VECTOR_BACKEND,
+            dimension=SEMANTICA_VECTOR_DIMENSION,
         ),
         knowledge_graph=ContextGraph(advanced_analytics=True),
         decision_tracking=True,
@@ -118,14 +122,14 @@ def build_context_memory(settings: TramaSettings):
 def build_canonical_knowledge(settings: TramaSettings):
     if settings.utopia_url is None and settings.utopia_kb_id is None:
         return None
-    if not settings.utopia_url or not settings.utopia_kb_id or not settings.external_token:
+    if not settings.utopia_url or not settings.utopia_kb_id or not settings.utopia_token:
         raise ValueError(
-            "Utopia requiere TRAMA_UTOPIA_URL, TRAMA_UTOPIA_KB_ID y TRAMA_EXTERNAL_TOKEN"
+            "Utopia requiere TRAMA_UTOPIA_URL, TRAMA_UTOPIA_KB_ID y TRAMA_UTOPIA_TOKEN"
         )
     return UtopiaMcpAdapter(
         settings.utopia_url,
         settings.utopia_kb_id,
-        token=settings.external_token,
+        token=settings.utopia_token,
     )
 
 
@@ -370,10 +374,7 @@ def _run_control_command(args: argparse.Namespace) -> None:
             "queue_capacity": settings.queue_capacity,
             "max_concurrency": settings.max_concurrency,
             "dispatch_timeout_seconds": settings.dispatch_timeout_seconds,
-            "semantica_url": settings.semantica_url,
             "semantica_kg_path": settings.semantica_kg_path,
-            "semantica_vector_backend": settings.semantica_vector_backend,
-            "semantica_vector_dimension": settings.semantica_vector_dimension,
             "utopia_url": settings.utopia_url,
             "utopia_kb_id": settings.utopia_kb_id,
             "colibri_url": settings.colibri_url,

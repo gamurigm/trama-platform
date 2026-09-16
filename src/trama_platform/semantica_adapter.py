@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from .contracts import Evidence, MemoryCandidate
+from .contracts import MemoryCandidate
 from .namespaces import can_read_candidate
 from .ports import ContextMemoryPort
 
@@ -52,13 +52,17 @@ class SemanticaContextAdapter(ContextMemoryPort):
             else:
                 metadata = dict(item.get("metadata") or {})
                 content = str(item.get("content", item.get("text", "")))
-                metadata.setdefault("candidate_id", str(item.get("id", item.get("memory_id", "semantica-memory"))))
+                memory_id = item.get("id", item.get("memory_id", "semantica-memory"))
+                metadata.setdefault("candidate_id", str(memory_id))
                 metadata.setdefault("project_id", project_id)
                 metadata.setdefault("organization_id", organization_id)
                 metadata.setdefault("subject", "Semantica memory")
                 metadata.setdefault("fact", content)
                 metadata.setdefault("source", "semantica")
-                metadata.setdefault("evidence", [{"source": "semantica", "locator": metadata["candidate_id"]}])
+                metadata.setdefault(
+                    "evidence",
+                    [{"source": "semantica", "locator": metadata["candidate_id"]}],
+                )
                 metadata.setdefault("confidence", 1.0)
                 candidate = MemoryCandidate.model_validate(metadata)
             self.candidates[candidate.candidate_id] = candidate

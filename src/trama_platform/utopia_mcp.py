@@ -98,7 +98,12 @@ class UtopiaMcpAdapter(ContextMemoryPort, CanonicalKnowledgePort):
                 source="utopia",
                 subject=str(chunk.get("filename") or "Utopia document"),
                 fact=str(chunk.get("text") or ""),
-                evidence=[Evidence(source="utopia", locator=str(chunk.get("document_id") or chunk["chunk_id"]))],
+                evidence=[
+                    Evidence(
+                        source="utopia",
+                        locator=str(chunk.get("document_id") or chunk["chunk_id"]),
+                    )
+                ],
                 confidence=1.0,
                 status="validated",
             )

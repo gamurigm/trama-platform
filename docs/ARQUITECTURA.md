@@ -38,9 +38,9 @@ TRAMA Control Plane Python
 
   +--> Task admission client --> Gateway Go
   |
-  +--> Semantica: contexto y memoria episódica
+  +--> Semantica AgentContext: contexto, decisiones y memoria episódica
               |
-              +--> promoción validada --> Utopia: conocimiento canónico
+              +--> evidencia aprobada --> Utopia MCP: conocimiento canónico
 ```
 
 ## Aislamiento
@@ -59,6 +59,17 @@ El primer adaptador es `generador-diccionario-entidades`, que conservará la
 extracción code-first y la auditoría Oracle como fuentes de evidencia. Su
 linaje `tabla -> trigger -> DML -> tabla auditiva` podrá convertirse en un
 `MemoryCandidate` y, tras validación, en una promoción a Utopia.
+
+Semantica se usa nativamente dentro de los workers Python mediante
+`AgentContext`, `ContextGraph` y `VectorStore`; el `agent_id`, la tarea y la
+fuente viajan como metadata. Su servidor `semantica-mcp` es únicamente `stdio`
+local para clientes MCP y no se trata como REST.
+
+Utopia se despliega como aplicación Rust/PostgreSQL y cada knowledge base se
+expone por `POST /api/v1/kbs/{kb_id}/mcp`. TRAMA usa `search_chunks` para leer y
+`remember` para registrar una frase; la extracción de hechos queda pendiente de
+revisión humana en Utopia. Los permisos se delegan a la PAT y al rol del
+usuario en la base.
 
 Hermes es un proceso externo supervisado de TRAMA. Puede consultar contexto,
 enviar tareas, registrar resultados y capturar candidatos con evidencia a

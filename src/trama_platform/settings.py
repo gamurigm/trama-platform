@@ -52,13 +52,10 @@ class TramaSettings:
     queue_capacity: int = 100
     max_concurrency: int = 4
     dispatch_timeout_seconds: int = 900
-    semantica_url: str | None = None
     semantica_kg_path: str | None = None
-    semantica_vector_backend: str = "inmemory"
-    semantica_vector_dimension: int = 768
     utopia_url: str | None = None
     utopia_kb_id: str | None = None
-    external_token: str | None = None
+    utopia_token: str | None = None
     colibri_url: str | None = None
     colibri_model: str | None = None
     nats_url: str = "nats://127.0.0.1:4222"
@@ -94,13 +91,10 @@ class TramaSettings:
             dispatch_timeout_seconds=_read_positive_int(
                 "TRAMA_DISPATCH_TIMEOUT_SECONDS", 900
             ),
-            semantica_url=os.getenv("TRAMA_SEMANTICA_URL") or None,
             semantica_kg_path=os.getenv("TRAMA_SEMANTICA_KG_PATH") or None,
-            semantica_vector_backend=os.getenv("TRAMA_SEMANTICA_VECTOR_BACKEND", "inmemory"),
-            semantica_vector_dimension=_read_positive_int("TRAMA_SEMANTICA_VECTOR_DIMENSION", 768),
             utopia_url=os.getenv("TRAMA_UTOPIA_URL") or None,
             utopia_kb_id=os.getenv("TRAMA_UTOPIA_KB_ID") or None,
-            external_token=os.getenv("TRAMA_EXTERNAL_TOKEN") or None,
+            utopia_token=os.getenv("TRAMA_UTOPIA_TOKEN") or None,
             colibri_url=os.getenv("TRAMA_COLIBRI_URL") or None,
             colibri_model=os.getenv("TRAMA_COLIBRI_MODEL") or None,
             nats_url=os.getenv("TRAMA_NATS_URL", "nats://127.0.0.1:4222"),

@@ -25,6 +25,9 @@ dev = [
   "pytest-cov>=6,<7",
   "ruff>=0.9,<1",
 ]
+integrations = [
+  "semantica>=0.6.8,<0.7",
+]
 
 [project.scripts]
 trama = "trama_platform.cli:main"
