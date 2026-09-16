@@ -21,6 +21,8 @@ import { MemoryScreen } from "./screens/MemoryScreen";
 import { HealthScreen } from "./screens/HealthScreen";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { ProjectPicker } from "./ui/ProjectPicker";
+import { DetailScreen } from "./screens/DetailScreen";
+import type { TimelineEntry } from "./api/types";
 
 type AppState =
   | { status: "loading" }
@@ -28,6 +30,7 @@ type AppState =
   | { status: "error"; error: Error };
 
 type PendingAction = { taskId: string; action: TaskAction };
+type DetailState = { kind: string; id: string; timeline: TimelineEntry[]; loading: boolean; error?: string };
 
 export function App({ client, pollMs = 2000 }: { client: TramaApiClient; pollMs?: number }) {
   const renderer = useRenderer();
@@ -35,6 +38,7 @@ export function App({ client, pollMs = 2000 }: { client: TramaApiClient; pollMs?
   const [state, setState] = useState<AppState>({ status: "loading" });
   const [screenData, setScreenData] = useState<ScreenData>({});
   const [pendingAction, setPendingAction] = useState<PendingAction>();
+  const [detail, setDetail] = useState<DetailState>();
   const [navigation, setNavigation] = useState(initialNavigation);
   const requestInFlight = useRef(false);
 
@@ -142,8 +146,24 @@ export function App({ client, pollMs = 2000 }: { client: TramaApiClient; pollMs?
       }
       return;
     }
+    if (detail) {
+      if (normalizedName === "escape" || normalizedName === "esc") setDetail(undefined);
+      return;
+    }
     if (normalizedName === "r") void refresh();
     if (normalizedName === "q") renderer.destroy();
+    if ((normalizedName === "enter" || normalizedName === "return") && navigation.screen === "tasks") {
+      const taskId = navigation.selectedId ?? (state.status === "ready" ? state.data.tasks[0]?.task_id : undefined);
+      if (taskId) {
+        setDetail({ kind: "Task", id: taskId, timeline: [], loading: true });
+        void client.getTaskTimeline(taskId).then((timeline) => {
+          setDetail({ kind: "Task", id: taskId, timeline, loading: false });
+        }).catch((error) => {
+          setDetail({ kind: "Task", id: taskId, timeline: [], loading: false, error: error instanceof Error ? error.message : String(error) });
+        });
+      }
+      return;
+    }
     if (normalizedName === "down" || normalizedName === "arrowdown" || normalizedName === "j" || normalizedName === "up" || normalizedName === "arrowup" || normalizedName === "k") {
       const direction = normalizedName === "up" || normalizedName === "arrowup" || normalizedName === "k" ? -1 : 1;
       setNavigation((current) => {
@@ -201,7 +221,9 @@ export function App({ client, pollMs = 2000 }: { client: TramaApiClient; pollMs?
       {"staleSince" in state && state.staleSince ? <text fg={colors.attention}>{`Datos obsoletos · ${state.error?.message ?? "actualiza con r"}`}</text> : null}
       <box flexDirection={stacked ? "column" : "row"} flexGrow={1}>
         <NavigationRail screen={screen} compact={stacked} onChoose={(nextScreen: ScreenId) => setNavigation((current) => reduceNavigation(current, { type: "open-screen", screen: nextScreen }))} />
-        {screen === "dashboard" ? (
+        {detail ? (
+          <DetailScreen kind={detail.kind} id={detail.id} projectId={navigation.projectId} timeline={detail.timeline} loading={detail.loading} error={detail.error} />
+        ) : screen === "dashboard" ? (
           <DashboardScreen data={state.data} stacked={stacked} />
         ) : (
           operationalScreen

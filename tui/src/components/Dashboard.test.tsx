@@ -265,6 +265,26 @@ test("moves between shell screens with arrow keys", async () => {
   await destroy(setup as never);
 });
 
+test("opens the selected task timeline with Enter", async () => {
+  const client = {
+    getDashboard: async () => appDashboard,
+    getTaskTimeline: async () => [{ entry_id: "entry-1", kind: "event", sequence: 1, actor: "system", action: "task.accepted", status: "accepted" }],
+  };
+  const setup = await renderApp(client, 100);
+  await act(async () => { await setup.waitForFrame((frame) => frame.includes("Run tests")); });
+  setup.mockInput.pressArrow("down");
+  await setup.waitForFrame((frame) => frame.includes("Projects"));
+  setup.mockInput.pressArrow("down");
+  await setup.waitForFrame((frame) => frame.includes("Tasks"));
+  await setup.waitForVisualIdle({ quietFrames: 2 });
+  await act(async () => { setup.mockInput.pressEnter(); });
+  await setup.waitForFrame((frame) => frame.includes("Timeline"));
+  expect(setup.captureCharFrame()).toContain("task.accepted");
+  setup.mockInput.pressEscape();
+  await setup.waitForFrame((frame) => frame.includes("TRAMA  ·  Tasks"));
+  await destroy(setup as never);
+});
+
 test("shows the shell title and keyboard hints at a narrow width", async () => {
   const client = { getDashboard: async () => appDashboard };
   const setup = await renderApp(client, 48);
