@@ -78,10 +78,14 @@ test("keeps table fields and phase counters on one line at 80 columns", async ()
 });
 
 test("uses blocked styling for uppercase blocked states", async () => {
+  const phase = dashboard.phases[0];
+  const task = dashboard.tasks[0];
+  if (!phase || !task) throw new Error("blocked styling fixture is incomplete");
+
   const setup = await renderDashboard(80, {
     ...dashboard,
-    phases: [{ ...dashboard.phases[0], status: "BLOCKED" }],
-    tasks: [{ ...dashboard.tasks[0], state: "BLOCKED" }],
+    phases: [{ ...phase, status: "BLOCKED" }],
+    tasks: [{ ...task, state: "BLOCKED" }],
   });
   const blockedSpans = setup.captureSpans().lines.flatMap((line) => line.spans).filter((span) => span.text.includes("!"));
 
