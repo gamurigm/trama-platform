@@ -178,6 +178,13 @@ export function App({ client, pollMs = 2000 }: { client: TramaApiClient; pollMs?
           : [];
         if (tasks.length > 0) {
           setNavigation((current) => {
+            const atTop = direction < 0 && current.selectedIndex === 0;
+            const atBottom = direction > 0 && current.selectedIndex === tasks.length - 1;
+            if (atTop || atBottom) {
+              const currentIndex = screenIds.indexOf(current.screen);
+              const nextScreen = screenIds[(currentIndex + direction + screenIds.length) % screenIds.length] ?? "dashboard";
+              return reduceNavigation(current, { type: "open-screen", screen: nextScreen });
+            }
             const nextIndex = (current.selectedIndex + direction + tasks.length) % tasks.length;
             return reduceNavigation(current, { type: "select-id", id: tasks[nextIndex]?.task_id, index: nextIndex });
           });

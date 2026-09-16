@@ -294,6 +294,19 @@ test("opens the selected task timeline with Enter", async () => {
   await destroy(setup as never);
 });
 
+test("leaves Tasks at the list boundaries with arrow keys", async () => {
+  const client = { getDashboard: async () => appDashboard };
+  const setup = await renderApp(client, 100);
+  await act(async () => { await setup.waitForFrame((frame) => frame.includes("Run tests")); });
+  await act(async () => { setup.mockInput.pressArrow("down"); });
+  await setup.waitForFrame((frame) => frame.includes("Projects"));
+  await act(async () => { setup.mockInput.pressArrow("down"); });
+  await setup.waitForFrame((frame) => frame.includes("Tasks"));
+  await act(async () => { setup.mockInput.pressArrow("up"); });
+  await setup.waitForFrame((frame) => frame.includes("TRAMA  ·  Projects"));
+  await destroy(setup as never);
+});
+
 test("shows the shell title and keyboard hints at a narrow width", async () => {
   const client = { getDashboard: async () => appDashboard };
   const setup = await renderApp(client, 48);
