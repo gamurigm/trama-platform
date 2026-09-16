@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useKeyboard, useRenderer } from "@opentui/react";
+import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
 import { AgentsPanel } from "./components/AgentsPanel";
 import { PhasePanel } from "./components/PhasePanel";
 import { StatusBar } from "./components/StatusBar";
@@ -14,6 +14,7 @@ type AppState =
 
 export function App({ client, pollMs = 2000 }: { client: TramaApiClient; pollMs?: number }) {
   const renderer = useRenderer();
+  const { width } = useTerminalDimensions();
   const [state, setState] = useState<AppState>({ status: "loading" });
   const requestInFlight = useRef(false);
 
@@ -49,11 +50,13 @@ export function App({ client, pollMs = 2000 }: { client: TramaApiClient; pollMs?
     return <box flexGrow={1} alignItems="center" justifyContent="center"><text>API no disponible: {state.error.message}</text></box>;
   }
 
+  const stacked = width < 60;
+
   return (
     <box flexDirection="column" width="100%" height="100%">
       <StatusBar status={state.data.status} />
-      <box flexDirection="row" flexGrow={1}>
-        <box flexDirection="column" width="40%">
+      <box flexDirection={stacked ? "column" : "row"} flexGrow={1}>
+        <box flexDirection="column" width={stacked ? "100%" : "40%"} flexGrow={stacked ? 1 : undefined}>
           <PhasePanel phases={state.data.phases} />
           <AgentsPanel agents={state.data.agents} />
         </box>

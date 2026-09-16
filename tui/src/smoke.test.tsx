@@ -9,5 +9,7 @@ test("renders TRAMA in the OpenTUI test renderer", async () => {
     await setup.renderOnce();
   });
   expect(setup.captureCharFrame()).toContain("TRAMA");
-  setup.renderer.destroy();
+  await act(async () => {
+    setup.renderer.destroy();
+  });
 });

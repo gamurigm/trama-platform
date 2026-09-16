@@ -5,7 +5,7 @@ function stateIcon(state: string | undefined): string {
   const normalized = state?.toLowerCase();
   if (normalized === "running" || normalized === "active" || normalized === "in_progress") return "›";
   if (normalized === "blocked" || normalized === "failed" || normalized === "error") return "!";
-  if (normalized === "success" || normalized === "completed" || normalized === "done") return "✓";
+  if (normalized === "success" || normalized === "succeeded" || normalized === "completed" || normalized === "done") return "✓";
   return "○";
 }
 

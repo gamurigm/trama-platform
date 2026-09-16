@@ -11,7 +11,7 @@ import type { DashboardData } from "../api/types";
 
 const dashboard = {
   status: { status: "ok", projects: 2, queue_depth: 1, active_dispatches: 1 },
-  phases: [{ phase_id: "phase-1", name: "Diseño", status: "running", progress: 50, completed_tasks: 1, total_tasks: 2 }],
+  phases: [{ phase_id: "phase-1", name: "Diseño", status: "running", progress: 0.5, completed_tasks: 1, total_tasks: 2 }],
   agents: [{ agent_id: "codex", active: 1, completed: 3, tasks: 4, blocked: 0 }],
   tasks: [{ task_id: "task-1", objective: "Run tests", actor: "codex", state: "running", source: "local" }],
 };
@@ -47,8 +47,8 @@ async function destroy(setup: Awaited<ReturnType<typeof renderDashboard>>) {
 
 const appDashboard: DashboardData = dashboard;
 
-async function renderApp(client: { getDashboard: () => Promise<DashboardData> }) {
-  const setup = await testRender(<App client={client as unknown as TramaApiClient} pollMs={60000} />, { width: 80, height: 24 });
+async function renderApp(client: { getDashboard: () => Promise<DashboardData> }, width = 80) {
+  const setup = await testRender(<App client={client as unknown as TramaApiClient} pollMs={60000} />, { width, height: 24 });
   await act(async () => {
     await setup.renderOnce();
   });
@@ -73,9 +73,13 @@ test("transitions from connecting to the dashboard data", async () => {
 });
 
 test("shows API unavailable when loading the dashboard fails", async () => {
-  const client = { getDashboard: async () => { throw new Error("offline"); } };
+  let rejectDashboard!: (reason?: unknown) => void;
+  const client = { getDashboard: () => new Promise<DashboardData>((_resolve, reject) => { rejectDashboard = reject; }) };
   const setup = await renderApp(client);
 
+  await act(async () => {
+    rejectDashboard(new Error("offline"));
+  });
   await act(async () => {
     await setup.waitForFrame((frame) => frame.includes("API no disponible"));
   });
@@ -86,15 +90,33 @@ test("shows API unavailable when loading the dashboard fails", async () => {
 
 test("refreshes the dashboard when r is pressed", async () => {
   let calls = 0;
-  const client = { getDashboard: async () => { calls += 1; return appDashboard; } };
+  const resolvers: Array<(value: DashboardData) => void> = [];
+  const client = {
+    getDashboard: () => new Promise<DashboardData>((resolve) => {
+      calls += 1;
+      resolvers.push(resolve);
+    }),
+  };
   const setup = await renderApp(client);
   await act(async () => {
     await setup.waitFor(() => calls === 1);
+    const resolve = resolvers.shift();
+    if (!resolve) throw new Error("initial dashboard request did not register a resolver");
+    resolve(appDashboard);
+  });
+  await act(async () => {
+    await setup.waitForFrame((frame) => frame.includes("Run tests"));
   });
 
   await act(async () => {
     setup.mockInput.pressKey("r");
     await setup.waitFor(() => calls === 2);
+    const resolve = resolvers.shift();
+    if (!resolve) throw new Error("refresh dashboard request did not register a resolver");
+    resolve(appDashboard);
+  });
+  await act(async () => {
+    await setup.waitForFrame((frame) => frame.includes("Run tests"));
   });
 
   expect(calls).toBe(2);
@@ -136,6 +158,23 @@ test("keeps table fields and phase counters on one line at 80 columns", async ()
   await destroy(setup);
 });
 
+test("renders fractional phase progress as 0, 50, and 100 percent", async () => {
+  const setup = await renderDashboard(80, {
+    ...dashboard,
+    phases: [
+      { phase_id: "zero", name: "Cero", status: "planned", progress: 0, completed_tasks: 0, total_tasks: 2 },
+      { phase_id: "half", name: "Mitad", status: "planned", progress: 0.5, completed_tasks: 1, total_tasks: 2 },
+      { phase_id: "full", name: "Completa", status: "planned", progress: 1, completed_tasks: 2, total_tasks: 2 },
+    ],
+  });
+  const frame = setup.captureCharFrame();
+
+  expect(frame).toContain("Cero ░░░░░░░░░░ 0% 0/2");
+  expect(frame).toContain("Mitad █████░░░░░ 50% 1/2");
+  expect(frame).toContain("Completa ██████████ 100%");
+  await destroy(setup);
+});
+
 test("uses blocked styling for uppercase blocked states", async () => {
   const phase = dashboard.phases[0];
   const task = dashboard.tasks[0];
@@ -153,6 +192,16 @@ test("uses blocked styling for uppercase blocked states", async () => {
   await destroy(setup);
 });
 
+test("renders succeeded tasks as successful", async () => {
+  const task = dashboard.tasks[0];
+  if (!task) throw new Error("task fixture is incomplete");
+
+  const setup = await renderDashboard(80, { ...dashboard, tasks: [{ ...task, state: "succeeded" }] });
+
+  expect(setup.captureCharFrame()).toContain("✓ Run tests");
+  await destroy(setup);
+});
+
 test("keeps both panel titles visible in a narrow terminal", async () => {
   const setup = await renderDashboard(48);
   const frame = setup.captureCharFrame();
@@ -160,4 +209,29 @@ test("keeps both panel titles visible in a narrow terminal", async () => {
   expect(frame).toContain("Fases");
   expect(frame).toContain("Tareas");
   await destroy(setup);
+});
+
+test("stacks App panels at 48 columns while preserving dashboard fields", async () => {
+  let resolveDashboard!: (value: DashboardData) => void;
+  const client = { getDashboard: () => new Promise<DashboardData>((resolve) => { resolveDashboard = resolve; }) };
+  const setup = await renderApp(client, 48);
+
+  await act(async () => {
+    resolveDashboard(appDashboard);
+  });
+  await act(async () => {
+    await setup.waitForFrame((frame) => frame.includes("Run tests"));
+  });
+  const frame = setup.captureCharFrame();
+
+  expect(frame).toContain("Fases");
+  expect(frame).toContain("Agentes CCCC");
+  expect(frame).toContain("Tareas");
+  expect(frame).toContain("ESTADO");
+  expect(frame).toContain("OBJETIVO");
+  expect(frame).toContain("AGENTE");
+  expect(frame).toContain("ORIGEN");
+  expect(frame).toContain("Run tests");
+  expect(frame).toContain("1/2");
+  await destroy(setup as never);
 });

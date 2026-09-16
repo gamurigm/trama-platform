@@ -15,9 +15,13 @@ function isBlocked(state: string | undefined): boolean {
 }
 
 function progressBar(progress: number | undefined): string {
-  const bounded = Math.max(0, Math.min(100, progress ?? 0));
-  const filled = Math.round((bounded / 100) * BAR_WIDTH);
+  const bounded = Math.max(0, Math.min(1, progress ?? 0));
+  const filled = Math.round(bounded * BAR_WIDTH);
   return "█".repeat(filled) + "░".repeat(BAR_WIDTH - filled);
+}
+
+function progressLabel(progress: number | undefined): string {
+  return `${Math.round(Math.max(0, Math.min(1, progress ?? 0)) * 100)}%`;
 }
 
 function phaseName(phase: Phase): string {
@@ -34,7 +38,7 @@ export function PhasePanel({ phases }: { phases: Phase[] }) {
           <text key={phase.phase_id} wrapMode="none">
             <span fg={isBlocked(phase.status) ? "#f87171" : "#86efac"}>{stateIcon(phase.status)} </span>
             <strong>{phaseName(phase)}</strong>
-            {" "}{progressBar(phase.progress)} {Math.round(phase.progress ?? 0)}%
+            {" "}{progressBar(phase.progress)} {progressLabel(phase.progress)}
             {phase.completed_tasks !== undefined && phase.total_tasks !== undefined
               ? ` ${phase.completed_tasks}/${phase.total_tasks}`
               : ""}
