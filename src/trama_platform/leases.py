@@ -38,7 +38,11 @@ class TaskLeaseStore(Protocol):
 
     def complete_task_lease(self, lease: TaskLease) -> bool: ...
 
-    def complete_task_lease_for_task(self, organization_id: str, task_id: str) -> bool: ...
+    def complete_task_lease_for_task(
+        self, organization_id: str, task_id: str, *, attempt: int | None = None
+    ) -> bool: ...
+
+    def is_task_lease_current(self, lease: TaskLease) -> bool: ...
 
     def release_task_lease(self, lease: TaskLease) -> bool: ...
 
@@ -92,7 +96,14 @@ class TaskLeaseManager:
 
     def complete(self, task: TaskEnvelope) -> bool:
         self._stop_local(task.organization_id, task.task_id)
-        return self.store.complete_task_lease_for_task(task.organization_id, task.task_id)
+        return self.store.complete_task_lease_for_task(
+            task.organization_id,
+            task.task_id,
+            attempt=task.execution_attempt,
+        )
+
+    def is_current(self, lease: TaskLease) -> bool:
+        return self.store.is_task_lease_current(lease)
 
     def release(self, lease: TaskLease) -> bool:
         self._stop_local(lease.organization_id, lease.task_id, lease.lease_token)

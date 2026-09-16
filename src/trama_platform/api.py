@@ -426,6 +426,8 @@ def create_app(
             app.state.runtime.record_result(result)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"task_id": result.task_id, "status": "recorded"}
 
     @app.post("/v1/memory/candidates", status_code=201)

@@ -309,7 +309,9 @@ class SqliteStateStore:
             )
         return cursor.rowcount == 1
 
-    def complete_task_lease_for_task(self, organization_id: str, task_id: str) -> bool:
+    def complete_task_lease_for_task(
+        self, organization_id: str, task_id: str, *, attempt: int | None = None
+    ) -> bool:
         now = time()
         with self._connection() as connection:
             cursor = connection.execute(
@@ -320,10 +322,36 @@ class SqliteStateStore:
                   AND task_id = ?
                   AND completed = 0
                   AND expires_at > ?
+                  AND (? IS NULL OR attempt = ?)
                 """,
-                (now, organization_id, task_id, now),
+                (now, organization_id, task_id, now, attempt, attempt),
             )
         return cursor.rowcount == 1
+
+    def is_task_lease_current(self, lease: TaskLease) -> bool:
+        now = time()
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT 1 FROM task_leases
+                WHERE organization_id = ?
+                  AND task_id = ?
+                  AND owner_id = ?
+                  AND lease_token = ?
+                  AND attempt = ?
+                  AND completed = 0
+                  AND expires_at > ?
+                """,
+                (
+                    lease.organization_id,
+                    lease.task_id,
+                    lease.owner_id,
+                    lease.lease_token,
+                    lease.attempt,
+                    now,
+                ),
+            ).fetchone()
+        return row is not None
 
     def release_task_lease(self, lease: TaskLease) -> bool:
         now = time()
@@ -371,6 +399,234 @@ class SqliteStateStore:
                     event_payload,
                 ),
             )
+
+    def save_task_transition_if_lease_current(
+        self, task: TaskEnvelope, event: OperationEvent
+    ) -> bool:
+        if task.execution_attempt is None:
+            self.save_task_transition(task, event)
+            return True
+        now = time()
+        task_payload = json.dumps(task.model_dump(mode="json"), ensure_ascii=False)
+        event_payload = json.dumps(event.model_dump(mode="json"), ensure_ascii=False)
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT payload FROM state_records
+                WHERE kind = ? AND record_id = ?
+                """,
+                ("task", task.task_id),
+            ).fetchone()
+            current = (
+                None
+                if row is None
+                else TaskEnvelope.model_validate(json.loads(row["payload"]))
+            )
+            if (
+                current is None
+                or current.organization_id != task.organization_id
+                or current.project_id != task.project_id
+                or current.state not in {"accepted", "running"}
+                or (
+                    current.execution_attempt is not None
+                    and current.execution_attempt > task.execution_attempt
+                )
+            ):
+                connection.rollback()
+                return False
+            lease = connection.execute(
+                """
+                SELECT 1 FROM task_leases
+                WHERE organization_id = ?
+                  AND task_id = ?
+                  AND attempt = ?
+                  AND completed = 0
+                  AND expires_at > ?
+                """,
+                (task.organization_id, task.task_id, task.execution_attempt, now),
+            ).fetchone()
+            if lease is None:
+                connection.rollback()
+                return False
+            connection.execute(
+                """
+                INSERT INTO state_records(kind, record_id, payload)
+                VALUES (?, ?, ?)
+                ON CONFLICT(kind, record_id) DO UPDATE SET payload = excluded.payload
+                """,
+                ("task", task.task_id, task_payload),
+            )
+            connection.execute(
+                """
+                INSERT INTO operation_events(event_id, created_at, payload)
+                VALUES (?, ?, ?)
+                """,
+                (event.event_id, event.created_at.isoformat(), event_payload),
+            )
+        return True
+
+    def save_task_result(self, task: TaskEnvelope, result: AgentResult) -> bool:
+        task_payload = json.dumps(task.model_dump(mode="json"), ensure_ascii=False)
+        result_payload = json.dumps(result.model_dump(mode="json"), ensure_ascii=False)
+        if task.execution_attempt is None:
+            now = time()
+            with self._connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    """
+                    SELECT payload FROM state_records
+                    WHERE kind = ? AND record_id = ?
+                    """,
+                    ("task", task.task_id),
+                ).fetchone()
+                current = (
+                    None
+                    if row is None
+                    else TaskEnvelope.model_validate(json.loads(row["payload"]))
+                )
+                lease = connection.execute(
+                    """
+                    SELECT attempt FROM task_leases
+                    WHERE organization_id = ?
+                      AND task_id = ?
+                      AND completed = 0
+                      AND expires_at > ?
+                    """,
+                    (task.organization_id, task.task_id, now),
+                ).fetchone()
+                if (
+                    current is not None
+                    and (
+                        current.organization_id != task.organization_id
+                        or current.project_id != task.project_id
+                        or current.state not in {"accepted", "running"}
+                    )
+                ):
+                    connection.rollback()
+                    return False
+                if (
+                    current is not None
+                    and current.execution_attempt is not None
+                    and lease is None
+                ):
+                    connection.rollback()
+                    return False
+                effective_attempt = None if lease is None else int(lease["attempt"])
+                if effective_attempt is not None and result.execution_attempt != effective_attempt:
+                    connection.rollback()
+                    return False
+                persisted_task = task.model_copy(
+                    update={"execution_attempt": effective_attempt}
+                )
+                connection.execute(
+                    """
+                    INSERT INTO state_records(kind, record_id, payload)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(kind, record_id) DO UPDATE SET payload = excluded.payload
+                    """,
+                    ("task", task.task_id, json.dumps(
+                        persisted_task.model_dump(mode="json"), ensure_ascii=False
+                    )),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO state_records(kind, record_id, payload)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(kind, record_id) DO UPDATE SET payload = excluded.payload
+                    """,
+                    ("result", result.task_id, result_payload),
+                )
+                if effective_attempt is not None:
+                    updated = connection.execute(
+                        """
+                        UPDATE task_leases
+                        SET completed = 1, expires_at = ?
+                        WHERE organization_id = ?
+                          AND task_id = ?
+                          AND attempt = ?
+                          AND completed = 0
+                          AND expires_at > ?
+                        """,
+                        (now, task.organization_id, task.task_id, effective_attempt, now),
+                    )
+                    if updated.rowcount != 1:
+                        connection.rollback()
+                        return False
+            return True
+
+        if result.execution_attempt != task.execution_attempt:
+            return False
+
+        now = time()
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT payload FROM state_records
+                WHERE kind = ? AND record_id = ?
+                """,
+                ("task", task.task_id),
+            ).fetchone()
+            current = (
+                None
+                if row is None
+                else TaskEnvelope.model_validate(json.loads(row["payload"]))
+            )
+            if (
+                current is None
+                or current.organization_id != task.organization_id
+                or current.state not in {"accepted", "running"}
+                or current.execution_attempt != task.execution_attempt
+            ):
+                connection.rollback()
+                return False
+            lease = connection.execute(
+                """
+                SELECT 1 FROM task_leases
+                WHERE organization_id = ?
+                  AND task_id = ?
+                  AND attempt = ?
+                  AND completed = 0
+                  AND expires_at > ?
+                """,
+                (task.organization_id, task.task_id, task.execution_attempt, now),
+            ).fetchone()
+            if lease is None:
+                connection.rollback()
+                return False
+            connection.execute(
+                """
+                INSERT INTO state_records(kind, record_id, payload)
+                VALUES (?, ?, ?)
+                ON CONFLICT(kind, record_id) DO UPDATE SET payload = excluded.payload
+                """,
+                ("task", task.task_id, task_payload),
+            )
+            connection.execute(
+                """
+                INSERT INTO state_records(kind, record_id, payload)
+                VALUES (?, ?, ?)
+                ON CONFLICT(kind, record_id) DO UPDATE SET payload = excluded.payload
+                """,
+                ("result", result.task_id, result_payload),
+            )
+            updated = connection.execute(
+                """
+                UPDATE task_leases
+                SET completed = 1, expires_at = ?
+                WHERE organization_id = ?
+                  AND task_id = ?
+                  AND attempt = ?
+                  AND completed = 0
+                  AND expires_at > ?
+                """,
+                (now, task.organization_id, task.task_id, task.execution_attempt, now),
+            )
+            if updated.rowcount != 1:
+                connection.rollback()
+                return False
+        return True
 
     def save_result(self, result: AgentResult) -> None:
         self._save_model("result", result.task_id, result)
@@ -907,7 +1163,9 @@ class PostgresStateStore:
             )
         return cursor.rowcount == 1
 
-    def complete_task_lease_for_task(self, organization_id: str, task_id: str) -> bool:
+    def complete_task_lease_for_task(
+        self, organization_id: str, task_id: str, *, attempt: int | None = None
+    ) -> bool:
         now = datetime.now(timezone.utc)
         with self._connection() as connection:
             cursor = connection.execute(
@@ -918,10 +1176,36 @@ class PostgresStateStore:
                   AND task_id = %s
                   AND completed = FALSE
                   AND expires_at > %s
+                  AND (%s IS NULL OR attempt = %s)
                 """,
-                (now, organization_id, task_id, now),
+                (now, organization_id, task_id, now, attempt, attempt),
             )
         return cursor.rowcount == 1
+
+    def is_task_lease_current(self, lease: TaskLease) -> bool:
+        now = datetime.now(timezone.utc)
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT 1 FROM trama.task_leases
+                WHERE organization_id = %s
+                  AND task_id = %s
+                  AND owner_id = %s
+                  AND lease_token = %s
+                  AND attempt = %s
+                  AND completed = FALSE
+                  AND expires_at > %s
+                """,
+                (
+                    lease.organization_id,
+                    lease.task_id,
+                    lease.owner_id,
+                    lease.lease_token,
+                    lease.attempt,
+                    now,
+                ),
+            ).fetchone()
+        return row is not None
 
     def release_task_lease(self, lease: TaskLease) -> bool:
         now = datetime.now(timezone.utc)
@@ -968,6 +1252,7 @@ class PostgresStateStore:
                     json.dumps(task_payload),
                 ),
             )
+
             connection.execute(
                 """
                 INSERT INTO trama.operation_events(
@@ -983,6 +1268,268 @@ class PostgresStateStore:
                     json.dumps(event_payload),
                 ),
             )
+
+    def save_task_transition_if_lease_current(
+        self, task: TaskEnvelope, event: OperationEvent
+    ) -> bool:
+        if task.execution_attempt is None:
+            self.save_task_transition(task, event)
+            return True
+        now = datetime.now(timezone.utc)
+        task_payload = task.model_dump(mode="json")
+        event_payload = event.model_dump(mode="json")
+        organization_id, project_id = self._namespace(task)
+        with self._connection() as connection:
+            current_row = connection.execute(
+                """
+                SELECT payload FROM trama.state_records
+                WHERE kind = %s AND organization_id = %s AND record_id = %s
+                FOR UPDATE
+                """,
+                ("task", task.organization_id, task.task_id),
+            ).fetchone()
+            current = (
+                None
+                if current_row is None
+                else TaskEnvelope.model_validate(self._payload(current_row))
+            )
+            if (
+                current is None
+                or current.project_id != task.project_id
+                or current.state not in {"accepted", "running"}
+                or (
+                    current.execution_attempt is not None
+                    and current.execution_attempt > task.execution_attempt
+                )
+            ):
+                connection.rollback()
+                return False
+            lease = connection.execute(
+                """
+                SELECT 1 FROM trama.task_leases
+                WHERE organization_id = %s
+                  AND task_id = %s
+                  AND attempt = %s
+                  AND completed = FALSE
+                  AND expires_at > %s
+                FOR UPDATE
+                """,
+                (task.organization_id, task.task_id, task.execution_attempt, now),
+            ).fetchone()
+            if lease is None:
+                connection.rollback()
+                return False
+            connection.execute(
+                """
+                INSERT INTO trama.state_records(
+                    kind, record_id, organization_id, project_id, payload, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT(kind, organization_id, record_id) DO UPDATE SET
+                    payload = excluded.payload,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    "task",
+                    task.task_id,
+                    organization_id,
+                    project_id,
+                    json.dumps(task_payload),
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO trama.operation_events(
+                    event_id, created_at, organization_id, project_id, payload
+                ) VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT(event_id) DO NOTHING
+                """,
+                (
+                    event.event_id,
+                    event.created_at,
+                    event.organization_id,
+                    event.project_id,
+                    json.dumps(event_payload),
+                ),
+            )
+        return True
+
+    def save_task_result(self, task: TaskEnvelope, result: AgentResult) -> bool:
+        task_payload = task.model_dump(mode="json")
+        result_payload = result.model_dump(mode="json")
+        organization_id, project_id = self._namespace(task)
+        if task.execution_attempt is None:
+            now = datetime.now(timezone.utc)
+            with self._connection() as connection:
+                row = connection.execute(
+                    """
+                    SELECT payload FROM trama.state_records
+                    WHERE kind = %s AND organization_id = %s AND record_id = %s
+                    FOR UPDATE
+                    """,
+                    ("task", task.organization_id, task.task_id),
+                ).fetchone()
+                current = (
+                    None
+                    if row is None
+                    else TaskEnvelope.model_validate(self._payload(row))
+                )
+                lease = connection.execute(
+                    """
+                    SELECT attempt FROM trama.task_leases
+                    WHERE organization_id = %s
+                      AND task_id = %s
+                      AND completed = FALSE
+                      AND expires_at > %s
+                    FOR UPDATE
+                    """,
+                    (task.organization_id, task.task_id, now),
+                ).fetchone()
+                effective_attempt = None if lease is None else int(lease["attempt"])
+                if (
+                    current is not None
+                    and (
+                        current.organization_id != task.organization_id
+                        or current.project_id != task.project_id
+                        or current.state not in {"accepted", "running"}
+                        or (
+                            current.execution_attempt is not None
+                            and (
+                                effective_attempt is None
+                                or current.execution_attempt > effective_attempt
+                            )
+                        )
+                    )
+                ):
+                    connection.rollback()
+                    return False
+                if effective_attempt is not None and result.execution_attempt != effective_attempt:
+                    connection.rollback()
+                    return False
+                persisted_task = task.model_copy(
+                    update={"execution_attempt": effective_attempt}
+                )
+                connection.execute(
+                    """
+                    INSERT INTO trama.state_records(
+                        kind, record_id, organization_id, project_id, payload, updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT(kind, organization_id, record_id) DO UPDATE SET
+                        payload = excluded.payload,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        "task",
+                        task.task_id,
+                        organization_id,
+                        project_id,
+                        json.dumps(persisted_task.model_dump(mode="json")),
+                    ),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO trama.state_records(
+                        kind, record_id, organization_id, project_id, payload, updated_at
+                    ) VALUES (%s, %s, %s, NULL, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT(kind, organization_id, record_id) DO UPDATE SET
+                        payload = excluded.payload,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    ("result", result.task_id, "default", json.dumps(result_payload)),
+                )
+                if effective_attempt is not None:
+                    updated = connection.execute(
+                        """
+                        UPDATE trama.task_leases
+                        SET completed = TRUE, expires_at = %s
+                        WHERE organization_id = %s
+                          AND task_id = %s
+                          AND attempt = %s
+                          AND completed = FALSE
+                          AND expires_at > %s
+                        """,
+                        (now, task.organization_id, task.task_id, effective_attempt, now),
+                    )
+                    if updated.rowcount != 1:
+                        connection.rollback()
+                        return False
+            return True
+
+        if result.execution_attempt != task.execution_attempt:
+            return False
+
+        now = datetime.now(timezone.utc)
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT payload FROM trama.state_records
+                WHERE kind = %s AND organization_id = %s AND record_id = %s
+                FOR UPDATE
+                """,
+                ("task", task.organization_id, task.task_id),
+            ).fetchone()
+            current = (
+                None
+                if row is None
+                else TaskEnvelope.model_validate(self._payload(row))
+            )
+            if (
+                current is None
+                or current.project_id != task.project_id
+                or current.state not in {"accepted", "running"}
+                or current.execution_attempt != task.execution_attempt
+            ):
+                connection.rollback()
+                return False
+            lease = connection.execute(
+                """
+                SELECT 1 FROM trama.task_leases
+                WHERE organization_id = %s
+                  AND task_id = %s
+                  AND attempt = %s
+                  AND completed = FALSE
+                  AND expires_at > %s
+                FOR UPDATE
+                """,
+                (task.organization_id, task.task_id, task.execution_attempt, now),
+            ).fetchone()
+            if lease is None:
+                connection.rollback()
+                return False
+            connection.execute(
+                """
+                UPDATE trama.state_records
+                SET payload = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE kind = %s AND organization_id = %s AND record_id = %s
+                """,
+                (json.dumps(task_payload), "task", organization_id, task.task_id),
+            )
+            connection.execute(
+                """
+                INSERT INTO trama.state_records(
+                    kind, record_id, organization_id, project_id, payload, updated_at
+                ) VALUES (%s, %s, %s, NULL, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT(kind, organization_id, record_id) DO UPDATE SET
+                    payload = excluded.payload,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                ("result", result.task_id, "default", json.dumps(result_payload)),
+            )
+            updated = connection.execute(
+                """
+                UPDATE trama.task_leases
+                SET completed = TRUE, expires_at = %s
+                WHERE organization_id = %s
+                  AND task_id = %s
+                  AND attempt = %s
+                  AND completed = FALSE
+                  AND expires_at > %s
+                """,
+                (now, task.organization_id, task.task_id, task.execution_attempt, now),
+            )
+            if updated.rowcount != 1:
+                connection.rollback()
+                return False
+        return True
 
     def save_result(self, result: AgentResult) -> None:
         self._save_model("result", result.task_id, result)

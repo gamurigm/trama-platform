@@ -64,7 +64,7 @@ class BoundedTaskQueue(TaskQueuePort):
         self._closed.set()
 
 
-TaskTransition = Callable[[TaskEnvelope, str, str, dict[str, object]], None]
+TaskTransition = Callable[[TaskEnvelope, str, str, dict[str, object]], bool | None]
 TaskLookup = Callable[[str], TaskEnvelope | None]
 
 
@@ -163,9 +163,19 @@ class TaskDispatcher:
                     if lease is None:
                         continue
                     self.lease_manager.start_renewal(lease)
-                running = current.model_copy(update={"state": "running"})
+                updates: dict[str, object] = {"state": "running"}
+                if lease is not None:
+                    updates["execution_attempt"] = lease.attempt
+                running = current.model_copy(update=updates)
                 try:
-                    self._transition(running, "task.dispatch", "accepted", {})
+                    transitioned = self._transition(running, "task.dispatch", "accepted", {})
+                    if transitioned is False:
+                        if lease is not None:
+                            self.lease_manager.release(lease)
+                        continue
+                    if lease is not None and not self.lease_manager.is_current(lease):
+                        self.lease_manager.release(lease)
+                        continue
                     self.coordination.submit_task(running)
                 except Exception as exc:
                     failed = running.model_copy(update={"state": "failed"})

@@ -63,7 +63,9 @@ class RecordingLeaseStore:
             self.completed.append(lease)
         return True
 
-    def complete_task_lease_for_task(self, organization_id: str, task_id: str) -> bool:
+    def complete_task_lease_for_task(
+        self, organization_id: str, task_id: str, *, attempt: int | None = None
+    ) -> bool:
         with self._lock:
             if not any(
                 lease.organization_id == organization_id and lease.task_id == task_id
@@ -76,6 +78,9 @@ class RecordingLeaseStore:
     def release_task_lease(self, lease: TaskLease) -> bool:
         with self._lock:
             self.released.append(lease)
+        return True
+
+    def is_task_lease_current(self, lease: TaskLease) -> bool:
         return True
 
 

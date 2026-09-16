@@ -21,7 +21,10 @@ pytest, Ruff y migraciones SQL versionadas.
 
 - El namespace de cada lease es `(organization_id, task_id)`.
 - Los tokens de lease nunca se imprimen ni se persisten fuera de la tabla de leases.
-- No se modifica `TaskEnvelope` ni la API pública/MCP.
+- `TaskEnvelope` añade `execution_attempt` como metadato interno nullable; no
+  se permite al cliente usarlo para cambiar la configuración de una tarea.
+- `AgentResult` transporta `execution_attempt` con valor `1` por defecto para
+  compatibilidad con productores existentes.
 - No se crean ni versionan `settings.json`, `.env`, `.vscode` ni credenciales.
 - SQLite mantiene el comportamiento local; Postgres es obligatorio para el modo distribuido.
 - La entrega NATS continúa siendo at-least-once y CCCC no se presenta como exactly-once.
@@ -87,7 +90,10 @@ class TaskLeaseStore(Protocol):
     def claim_task(self, task: TaskEnvelope, *, owner_id: str, lease_seconds: int) -> TaskLease | None: ...
     def renew_task_lease(self, lease: TaskLease, *, lease_seconds: int) -> bool: ...
     def complete_task_lease(self, lease: TaskLease) -> bool: ...
-    def complete_task_lease_for_task(self, organization_id: str, task_id: str) -> bool: ...
+    def complete_task_lease_for_task(
+        self, organization_id: str, task_id: str, *, attempt: int | None = None
+    ) -> bool: ...
+    def is_task_lease_current(self, lease: TaskLease) -> bool: ...
     def release_task_lease(self, lease: TaskLease) -> bool: ...
 ```
 
@@ -224,9 +230,10 @@ def test_two_runtimes_do_not_dispatch_the_same_recovered_task(tmp_path):
 ```
 
 Añadir una variante con lease expirado que compruebe que la segunda instancia
-sí puede recuperar la tarea, y una prueba que registra un `AgentResult` y
-comprueba que una entrega posterior no vuelve a despacharla. Mantener las
-pruebas locales sin `state_store` sin cambios de comportamiento.
+sí puede recuperar la tarea, una prueba que registra un `AgentResult` y
+comprueba que una entrega posterior no vuelve a despacharla, y una prueba que
+rechaza un resultado de un intento anterior. Mantener las pruebas locales sin
+`state_store` sin cambios de comportamiento.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -246,8 +253,11 @@ liberar en error y exponer `complete_task_lease(task)` para el runtime.
 `TramaRuntime` generará un `worker_id` UUID si no se proporciona, construirá
 el manager cuando exista un `state_store`, dejará de convertir
 automáticamente todo `running` a `accepted` y pasará `lease_seconds` al
-dispatcher. `record_result` completará el lease por namespace después de
-persistir el estado terminal. Añadir `task_lease_seconds` a `TramaSettings`
+dispatcher. `record_result` validará y persistirá el resultado terminal de
+forma atómica con el intento vigente. Una transición de despacho también se
+persiste con una comprobación condicional del lease, para impedir que una
+recuperación posterior publique un estado obsoleto. Añadir
+`task_lease_seconds` a `TramaSettings`
 con el entorno `TRAMA_TASK_LEASE_SECONDS` y pasar el valor desde API/CLI sin
 crear archivos de configuración.
 

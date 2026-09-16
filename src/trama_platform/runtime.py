@@ -232,7 +232,7 @@ class TramaRuntime:
         action: str,
         event_status: str,
         details: dict[str, object],
-    ) -> None:
+    ) -> bool:
         event = OperationEvent(
             actor="trama",
             action=action,
@@ -246,7 +246,11 @@ class TramaRuntime:
             details=details,
         )
         if self.state_store is not None:
-            self.state_store.save_task_transition(task, event)
+            if task.execution_attempt is not None:
+                if not self.state_store.save_task_transition_if_lease_current(task, event):
+                    return False
+            else:
+                self.state_store.save_task_transition(task, event)
         else:
             self._events.append(event)
         self._record_task_log(
@@ -260,6 +264,7 @@ class TramaRuntime:
             if isinstance(self.coordination, InMemoryCoordination):
                 self.coordination.tasks[task.task_id] = task
         self._refresh_planning_state()
+        return True
 
     def _persist_task_acceptance(self, task: TaskEnvelope, *, action: str = "task.submit") -> None:
         event = OperationEvent(
@@ -587,6 +592,7 @@ class TramaRuntime:
                 for data in (existing_data, incoming_data):
                     data.pop("state", None)
                     data.pop("created_at", None)
+                    data.pop("execution_attempt", None)
                 if existing_data != incoming_data:
                     raise ValueError(f"La tarea {task.task_id} ya existe con otra configuracion")
                 return task.task_id
@@ -602,18 +608,27 @@ class TramaRuntime:
         self._refresh_state_catalog()
         if result.task_id not in self.tasks:
             raise KeyError(f"La tarea {result.task_id} no esta registrada")
-        self.coordination.record_result(result)
-        self.results[result.task_id] = result
-        updated_task = self.tasks[result.task_id].model_copy(
+        current_task = self.tasks[result.task_id]
+        if (
+            current_task.execution_attempt is not None
+            and result.execution_attempt != current_task.execution_attempt
+        ):
+            raise ValueError(
+                f"El resultado de {result.task_id} pertenece a un intento obsoleto"
+            )
+        updated_task = current_task.model_copy(
             update={"state": result.status}
         )
+        if self.state_store is not None:
+            if not self.state_store.save_task_result(updated_task, result):
+                raise ValueError(
+                    f"El resultado de {result.task_id} no pudo confirmar su lease actual"
+                )
+        self.coordination.record_result(result)
+        self.results[result.task_id] = result
         self.tasks[result.task_id] = updated_task
         if isinstance(self.coordination, InMemoryCoordination):
             self.coordination.tasks[result.task_id] = updated_task
-        if self.state_store is not None:
-            self.state_store.save_task(updated_task)
-            self.state_store.save_result(result)
-        self.dispatcher.complete_task_lease(updated_task)
         task = updated_task
         self._record_event(
             action="task.result",
@@ -1181,7 +1196,7 @@ class TramaRuntime:
         task = self.get_task(task_id)
         if task.state not in {"failed", "partial", "blocked", "cancelled"}:
             raise ValueError(f"La tarea {task_id} no se puede reintentar desde {task.state}")
-        updated = task.model_copy(update={"state": "accepted"})
+        updated = task.model_copy(update={"state": "accepted", "execution_attempt": None})
         self.dispatcher.submit(
             updated,
             persist=lambda: self._transition_task(

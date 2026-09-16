@@ -38,7 +38,13 @@ renew_task_lease(
 ) -> bool
 complete_task_lease(lease: TaskLease) -> bool
 release_task_lease(lease: TaskLease) -> bool
-complete_task_lease_for_task(organization_id: str, task_id: str) -> bool
+complete_task_lease_for_task(
+    organization_id: str,
+    task_id: str,
+    *,
+    attempt: int | None = None,
+) -> bool
+is_task_lease_current(lease: TaskLease) -> bool
 ```
 
 `claim_task` será atómico. Devuelve un lease solo si la tarea no tiene un
@@ -47,11 +53,16 @@ lease activo o si el lease anterior expiró; en caso contrario devuelve
 organización, el task ID, el owner y el token para impedir que un worker
 antiguo libere o renueve el lease de otro.
 
-El camino que persiste un resultado terminal usará
-`complete_task_lease_for_task` después de validar el namespace y guardar el
-nuevo estado de la tarea. Ese método permite que el control plane Python
-complete el lease aunque el resultado llegue a una réplica distinta de la que
-lo reclamó; no acepta un task ID sin organización.
+El camino de transición a `running` usará una operación condicional que solo
+persiste la transición si el intento del lease sigue activo. El camino que
+persiste un resultado terminal validará de forma atómica el namespace, el
+`execution_attempt` vigente y el lease activo antes de guardar la tarea, el
+resultado y la finalización del lease. Así, un resultado tardío de un intento
+anterior no puede sobrescribir el estado de una recuperación posterior.
+
+La finalización genérica `complete_task_lease_for_task` queda disponible para
+operaciones administrativas y acepta un intento opcional; el flujo normal de
+resultados usa la operación atómica anterior.
 
 El dispatcher reclamará el lease justo antes de pasar la tarea a `running` y
 la conservará mientras la tarea siga siendo responsabilidad de ese worker.
@@ -95,10 +106,14 @@ prueba, no una ruta de producción distribuida.
 ## Contratos y compatibilidad
 
 `TaskLease` será un contrato interno de infraestructura y no se expondrá en
-la API pública ni en MCP. No se modifica `TaskEnvelope` ni se crea una
-configuración JSON. El owner se generará por proceso a partir de un UUID y
-datos no sensibles del worker; la duración se mantendrá como parámetro
-interno del servicio con valores seguros para local y producción.
+la API pública ni en MCP. `TaskEnvelope` añade el campo nullable
+`execution_attempt`, que solo se completa después de reclamar el lease y se
+ignora al comparar reentregas idempotentes. `AgentResult` transporta el
+intento que está confirmando y conserva el valor `1` por defecto para
+compatibilidad con productores existentes. No se crea una configuración JSON.
+El owner se generará por proceso a partir de un UUID y datos no sensibles del
+worker; la duración se mantendrá como parámetro interno del servicio con
+valores seguros para local y producción.
 
 La recuperación dejará de convertir ciegamente todos los estados `running` a
 `accepted`. La decisión de volver a encolar dependerá del lease: solo se
@@ -124,6 +139,10 @@ recuperarán tareas elegibles y reclamadas por la instancia actual.
 - Una recuperación de dos runtimes no produce dos llamadas a coordinación.
 - Un resultado terminal completa el lease y una entrega duplicada no vuelve a
   despachar.
+- Un resultado de un intento expirado no puede sobrescribir el task ni
+  completar el lease de un intento posterior.
+- Una transición o resultado que pierda la carrera contra una recuperación se
+  rechaza sin publicar un estado obsoleto.
 - El camino SQLite existente y todas las pruebas de NATS continúan pasando.
 - La migración PostgreSQL se valida sintácticamente y se añade una prueba de
   integración cuando el entorno de CI tenga Postgres disponible.

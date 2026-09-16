@@ -119,6 +119,7 @@ class TaskEnvelope(TramaContract):
     allowed_paths: list[str] = Field(default_factory=list, max_length=500)
     read_only: bool = False
     state: TaskLifecycle = "accepted"
+    execution_attempt: int | None = Field(default=None, ge=1, le=1_000_000_000)
     acceptance_criteria: list[str] = Field(min_length=1, max_length=100)
     created_at: datetime = Field(default_factory=utc_now)
 
@@ -186,6 +187,7 @@ class Verification(TramaContract):
 class AgentResult(TramaContract):
     schema_version: Literal["1.0"] = "1.0"
     task_id: str = Field(min_length=1, max_length=100)
+    execution_attempt: int = Field(default=1, ge=1, le=1_000_000_000)
     status: Literal["succeeded", "partial", "failed", "blocked"]
     summary: str = Field(min_length=1, max_length=4000)
     files_changed: list[str] = Field(default_factory=list, max_length=1000)
