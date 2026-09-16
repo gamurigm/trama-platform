@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 Visibility = Literal["private", "project", "shared"]
 Sensitivity = Literal["public", "internal", "restricted", "secret"]
 TaskLifecycle = Literal[
+    "planned",
     "accepted",
     "running",
     "succeeded",
@@ -24,6 +25,12 @@ TaskLifecycle = Literal[
     "blocked",
     "cancelled",
 ]
+RequirementStatus = Literal["proposed", "approved", "in_progress", "completed", "blocked"]
+PhaseStatus = Literal["planned", "ready", "in_progress", "completed", "blocked"]
+TaskSource = Literal["manual", "requirement"]
+LogLevel = Literal["debug", "info", "warning", "error"]
+PlanProposalStatus = Literal["proposed", "approved", "rejected", "superseded"]
+TimelineKind = Literal["event", "log"]
 
 
 def utc_now() -> datetime:
@@ -52,6 +59,36 @@ class ProjectManifest(TramaContract):
     policies: ProjectPolicies = Field(default_factory=ProjectPolicies)
 
 
+class Requirement(TramaContract):
+    schema_version: Literal["1.0"] = "1.0"
+    requirement_id: str = Field(
+        min_length=1, max_length=100, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    )
+    organization_id: str = Field(default="default", min_length=1, max_length=100)
+    project_id: str = Field(min_length=1, max_length=100)
+    title: str = Field(min_length=1, max_length=300)
+    description: str = Field(min_length=1, max_length=10000)
+    kind: Literal["feature", "change", "module", "refactor", "bugfix"] = "feature"
+    acceptance_criteria: list[str] = Field(min_length=1, max_length=100)
+    status: RequirementStatus = "proposed"
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class ProjectPhase(TramaContract):
+    schema_version: Literal["1.0"] = "1.0"
+    phase_id: str = Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
+    requirement_id: str = Field(min_length=1, max_length=100)
+    organization_id: str = Field(default="default", min_length=1, max_length=100)
+    project_id: str = Field(min_length=1, max_length=100)
+    name: str = Field(min_length=1, max_length=300)
+    sequence: int = Field(ge=1, le=1000)
+    depends_on: list[str] = Field(default_factory=list, max_length=100)
+    acceptance_criteria: list[str] = Field(min_length=1, max_length=100)
+    status: PhaseStatus = "planned"
+    approved_by: str | None = Field(default=None, max_length=200)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class ArtifactReference(TramaContract):
     artifact_id: str = Field(min_length=1, max_length=200)
     uri: str = Field(min_length=1, max_length=2000)
@@ -64,6 +101,11 @@ class TaskEnvelope(TramaContract):
     schema_version: Literal["1.0"] = "1.0"
     task_id: str = Field(min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._:-]*$")
     parent_task_id: str | None = Field(default=None, max_length=100)
+    requirement_id: str | None = Field(default=None, max_length=100)
+    phase_id: str | None = Field(default=None, max_length=100)
+    source: TaskSource = "manual"
+    depends_on: list[str] = Field(default_factory=list, max_length=100)
+    approved_by: str | None = Field(default=None, max_length=200)
     organization_id: str = Field(default="default", min_length=1, max_length=100)
     project_id: str = Field(min_length=1, max_length=100)
     objective: str = Field(min_length=1, max_length=4000)
@@ -76,6 +118,60 @@ class TaskEnvelope(TramaContract):
     state: TaskLifecycle = "accepted"
     acceptance_criteria: list[str] = Field(min_length=1, max_length=100)
     created_at: datetime = Field(default_factory=utc_now)
+
+
+class PlanProposal(TramaContract):
+    schema_version: Literal["1.0"] = "1.0"
+    proposal_id: str = Field(min_length=1, max_length=200)
+    requirement_id: str = Field(min_length=1, max_length=100)
+    organization_id: str = Field(default="default", min_length=1, max_length=100)
+    project_id: str = Field(min_length=1, max_length=100)
+    model_profile: str = Field(min_length=1, max_length=200)
+    input_refs: list[str] = Field(default_factory=list, max_length=100)
+    phase_ids: list[str] = Field(default_factory=list, max_length=1000)
+    task_ids: list[str] = Field(default_factory=list, max_length=2000)
+    summary: str = Field(min_length=1, max_length=10000)
+    status: PlanProposalStatus = "proposed"
+    version: int = Field(default=1, ge=1, le=1000)
+    correlation_id: str = Field(min_length=1, max_length=200)
+    approved_by: str | None = Field(default=None, max_length=200)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class TaskLog(TramaContract):
+    schema_version: Literal["1.0"] = "1.0"
+    log_id: str = Field(default_factory=lambda: uuid4().hex, min_length=1, max_length=100)
+    created_at: datetime = Field(default_factory=utc_now)
+    level: LogLevel = "info"
+    message: str = Field(min_length=1, max_length=4000)
+    metadata: dict[str, Any] = Field(default_factory=dict, max_length=50)
+    organization_id: str = Field(default="default", min_length=1, max_length=100)
+    project_id: str = Field(min_length=1, max_length=100)
+    requirement_id: str | None = Field(default=None, max_length=100)
+    phase_id: str | None = Field(default=None, max_length=100)
+    task_id: str | None = Field(default=None, max_length=100)
+    actor: str = Field(default="system", min_length=1, max_length=100)
+    correlation_id: str = Field(min_length=1, max_length=200)
+    duration_ms: int | None = Field(default=None, ge=0, le=86_400_000)
+    sequence: int = Field(default=1, ge=1, le=1_000_000_000)
+
+
+class TimelineEntry(TramaContract):
+    schema_version: Literal["1.0"] = "1.0"
+    entry_id: str = Field(min_length=1, max_length=100)
+    kind: TimelineKind
+    created_at: datetime
+    sequence: int = Field(ge=1)
+    actor: str = Field(min_length=1, max_length=100)
+    action: str | None = Field(default=None, max_length=200)
+    status: str | None = Field(default=None, max_length=50)
+    level: LogLevel | None = None
+    message: str | None = Field(default=None, max_length=4000)
+    metadata: dict[str, Any] = Field(default_factory=dict, max_length=50)
+    correlation_id: str | None = Field(default=None, max_length=200)
+    requirement_id: str | None = Field(default=None, max_length=100)
+    phase_id: str | None = Field(default=None, max_length=100)
+    task_id: str | None = Field(default=None, max_length=100)
 
 
 class Verification(TramaContract):
@@ -138,6 +234,11 @@ class OperationEvent(TramaContract):
     status: Literal["accepted", "succeeded", "failed", "blocked"]
     organization_id: str = Field(default="default", min_length=1, max_length=100)
     project_id: str | None = Field(default=None, max_length=100)
+    requirement_id: str | None = Field(default=None, max_length=100)
+    phase_id: str | None = Field(default=None, max_length=100)
+    task_id: str | None = Field(default=None, max_length=100)
+    correlation_id: str | None = Field(default=None, max_length=200)
+    duration_ms: int | None = Field(default=None, ge=0, le=86_400_000)
     details: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utc_now)
 
