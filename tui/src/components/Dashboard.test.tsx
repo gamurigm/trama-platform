@@ -5,6 +5,9 @@ import { AgentsPanel } from "./AgentsPanel";
 import { PhasePanel } from "./PhasePanel";
 import { StatusBar } from "./StatusBar";
 import { TaskTable } from "./TaskTable";
+import { App } from "../App";
+import type { TramaApiClient } from "../api/client";
+import type { DashboardData } from "../api/types";
 
 const dashboard = {
   status: { status: "ok", projects: 2, queue_depth: 1, active_dispatches: 1 },
@@ -41,6 +44,62 @@ async function destroy(setup: Awaited<ReturnType<typeof renderDashboard>>) {
     setup.renderer.destroy();
   });
 }
+
+const appDashboard: DashboardData = dashboard;
+
+async function renderApp(client: { getDashboard: () => Promise<DashboardData> }) {
+  const setup = await testRender(<App client={client as unknown as TramaApiClient} pollMs={60000} />, { width: 80, height: 24 });
+  await act(async () => {
+    await setup.renderOnce();
+  });
+  return setup;
+}
+
+test("transitions from connecting to the dashboard data", async () => {
+  let resolveDashboard!: (value: DashboardData) => void;
+  const client = { getDashboard: () => new Promise<DashboardData>((resolve) => { resolveDashboard = resolve; }) };
+  const setup = await renderApp(client);
+
+  expect(setup.captureCharFrame()).toContain("Conectando...");
+  await act(async () => {
+    resolveDashboard(appDashboard);
+  });
+  await act(async () => {
+    await setup.waitForFrame((frame) => frame.includes("Run tests"));
+  });
+
+  expect(setup.captureCharFrame()).toContain("Run tests");
+  await destroy(setup as never);
+});
+
+test("shows API unavailable when loading the dashboard fails", async () => {
+  const client = { getDashboard: async () => { throw new Error("offline"); } };
+  const setup = await renderApp(client);
+
+  await act(async () => {
+    await setup.waitForFrame((frame) => frame.includes("API no disponible"));
+  });
+
+  expect(setup.captureCharFrame()).toContain("API no disponible");
+  await destroy(setup as never);
+});
+
+test("refreshes the dashboard when r is pressed", async () => {
+  let calls = 0;
+  const client = { getDashboard: async () => { calls += 1; return appDashboard; } };
+  const setup = await renderApp(client);
+  await act(async () => {
+    await setup.waitFor(() => calls === 1);
+  });
+
+  await act(async () => {
+    setup.mockInput.pressKey("r");
+    await setup.waitFor(() => calls === 2);
+  });
+
+  expect(calls).toBe(2);
+  await destroy(setup as never);
+});
 
 test("renders the dashboard data in its panels", async () => {
   const setup = await renderDashboard(80);
