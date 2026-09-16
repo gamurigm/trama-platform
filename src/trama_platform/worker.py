@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from .coordination import build_coordination
 from .nats_consumer import TaskAdmittedConsumer
 from .runtime import TramaRuntime
 from .settings import TramaSettings
@@ -32,10 +33,12 @@ async def serve_task_worker(
 
     owns_runtime = runtime is None
     runtime_instance = runtime or TramaRuntime(
+        coordination=build_coordination(settings),
         state_store=build_state_store(settings),
         queue_capacity=settings.queue_capacity,
         max_concurrency=settings.max_concurrency,
         dispatch_timeout_seconds=settings.dispatch_timeout_seconds,
+        lease_seconds=settings.task_lease_seconds,
     )
     owns_connection = connection is None
     nats_connection = connection

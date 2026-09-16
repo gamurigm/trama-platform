@@ -248,6 +248,15 @@ entre réplicas. Para producción, configura OIDC/JWKS o una cuenta de servicio,
 el token interno entre gateway y control plane, y usa el chart Helm de
 `deploy/helm/trama-gateway`.
 
+El control plane coordina la ejecución mediante `trama.task_leases`: una fila
+por `(organization_id, task_id)` conserva owner, token, intento y
+`expires_at`. El worker reclama la tarea antes de emitir `task.dispatch` y la
+renueva mientras CCCC la procesa; al persistir un `AgentResult` terminal, el
+runtime completa el lease. Si el worker cae, otra réplica puede reclamar la
+tarea cuando vence el lease, por lo que la semántica es at-least-once y el
+coordinador debe tolerar redeliveries. El TTL se configura con
+`TRAMA_TASK_LEASE_SECONDS` y por defecto es de 60 segundos.
+
 Variables mínimas del control plane distribuido:
 
 ```powershell
@@ -255,6 +264,8 @@ $env:TRAMA_ENV = "prod"
 $env:TRAMA_DATABASE_URL = "postgresql://..."
 $env:TRAMA_INTERNAL_SERVICE_TOKEN = "<secret-del-gateway>"
 $env:TRAMA_REQUIRE_TENANT_CONTEXT = "true"
+# Opcional: TTL de ownership distribuido.
+$env:TRAMA_TASK_LEASE_SECONDS = "60"
 ```
 
 El API Python expone `/livez` y `/readyz` para probes. El endpoint Python no

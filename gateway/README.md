@@ -15,9 +15,9 @@ docker compose -f deploy/docker-compose.gateway.yml up --build
 
 Variables mínimas del gateway: `TRAMA_DATABASE_URL`; para despliegue
 multi-réplica configura también `TRAMA_REDIS_URL`. Las migraciones están en
-`migrations/000001_gateway.sql`, `migrations/000002_control_plane.sql` y
-`migrations/000003_namespace_keys.sql`. El módulo se prueba desde este
-directorio con `go test -race ./...`.
+`migrations/000001_gateway.sql`, `migrations/000002_control_plane.sql`,
+`migrations/000003_namespace_keys.sql` y `migrations/000004_task_leases.sql`.
+El módulo se prueba desde este directorio con `go test -race ./...`.
 
 En producción, configura `TRAMA_ENV=prod`, autenticación obligatoria,
 `TRAMA_CONTROL_PLANE_URL` y `TRAMA_CONTROL_PLANE_INTERNAL_TOKEN`. El gateway

@@ -142,6 +142,17 @@ mantiene el servicio Python como ClusterIP y no monta PVC de estado. PostgreSQL,
 Redis y NATS deben ser servicios gestionados o releases separados; sus URLs y
 tokens llegan por un Secret existente.
 
+La entrega a CCCC tiene además ownership durable en `trama.task_leases`, con
+clave `(organization_id, task_id)`. El claim atómico asigna `owner_id`,
+`lease_token`, `attempt` y `expires_at`; solo el owner con su token puede
+renovar o liberar el lease. Python renueva periódicamente durante el despacho
+y completa por namespace después de validar y persistir el resultado terminal.
+Un worker caído deja un lease vencible para redelivery; el contrato es
+at-least-once, no exactamente una ejecución externa. Las tareas `succeeded`,
+`partial`, `failed`, `blocked` o `cancelled` no se vuelven a despachar al
+recuperar el estado persistido. El TTL se controla con
+`TRAMA_TASK_LEASE_SECONDS` (60 segundos por defecto).
+
 ## Política de fallos
 
 - La ausencia de Semantica no detiene una tarea.
