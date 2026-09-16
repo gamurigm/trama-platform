@@ -23,9 +23,10 @@ from .contracts import (
     ToolInvocation,
     ToolResult,
 )
+from .leases import TaskLeaseStore
 
 
-class StateStorePort(Protocol):
+class StateStorePort(TaskLeaseStore, Protocol):
     def save_project(self, project: ProjectManifest) -> None: ...
 
     def load_projects(self) -> Sequence[ProjectManifest]: ...
