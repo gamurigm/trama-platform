@@ -28,7 +28,24 @@ function phaseName(phase: Phase): string {
   return typeof phase.name === "string" && phase.name.trim() ? phase.name : phase.phase_id;
 }
 
-export function PhasePanel({ phases }: { phases: Phase[] }) {
+export function PhasePanel({ phases, compact = false }: { phases: Phase[]; compact?: boolean }) {
+  if (compact) {
+    return (
+      <box flexDirection="column" padding={0} flexGrow={0} height={Math.max(1, phases.length + 1)}>
+        <text fg="#7dd3fc">Fases</text>
+        {phases.length === 0 ? (
+          <text fg="#94a3b8">sin fases configuradas</text>
+        ) : (
+          phases.map((phase) => (
+            <text key={phase.phase_id} wrapMode="none" fg={isBlocked(phase.status) ? "#f87171" : "#86efac"}>
+              {`${stateIcon(phase.status)} ${phaseName(phase)} ${progressLabel(phase.progress)}${phase.completed_tasks !== undefined && phase.total_tasks !== undefined ? ` ${phase.completed_tasks}/${phase.total_tasks}` : ""}`}
+            </text>
+          ))
+        )}
+      </box>
+    );
+  }
+
   return (
     <box border borderStyle="single" title="Fases" titleColor="#7dd3fc" flexDirection="column" padding={1} flexGrow={1}>
       {phases.length === 0 ? (

@@ -245,8 +245,8 @@ export class TramaApiClient {
     return collection(payload, "tasks", "/v1/tasks", task);
   }
 
-  async getDashboard(): Promise<DashboardData> {
-    const [status, overview] = await Promise.all([this.getStatus(), this.getOverview()]);
+  async getDashboard(projectId?: string): Promise<DashboardData> {
+    const [status, overview] = await Promise.all([this.getStatus(), this.getOverview(projectId)]);
     const tasks = Array.isArray(overview.queue) ? overview.queue : await this.getTasks();
     return {
       status,

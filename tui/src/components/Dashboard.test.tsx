@@ -66,6 +66,7 @@ test("transitions from connecting to the dashboard data", async () => {
   });
   await act(async () => {
     await setup.waitForFrame((frame) => frame.includes("Run tests"));
+    await setup.waitForVisualIdle({ quietFrames: 2 });
   });
 
   expect(setup.captureCharFrame()).toContain("Run tests");
@@ -221,6 +222,7 @@ test("stacks App panels at 48 columns while preserving dashboard fields", async 
   });
   await act(async () => {
     await setup.waitForFrame((frame) => frame.includes("Run tests"));
+    await setup.waitForVisualIdle({ quietFrames: 2 });
   });
   const frame = setup.captureCharFrame();
 
@@ -233,5 +235,34 @@ test("stacks App panels at 48 columns while preserving dashboard fields", async 
   expect(frame).toContain("ORIGEN");
   expect(frame).toContain("Run tests");
   expect(frame).toContain("1/2");
+  await destroy(setup as never);
+});
+
+test("opens the command palette with slash", async () => {
+  const client = { getDashboard: async () => appDashboard };
+  const setup = await renderApp(client, 100);
+
+  await act(async () => {
+    await setup.waitForFrame((frame) => frame.includes("Run tests"));
+  });
+  setup.mockInput.pressKey("/");
+  await setup.waitForFrame((frame) => frame.includes("Command palette"));
+
+  expect(setup.captureCharFrame()).toContain("Command palette");
+  await destroy(setup as never);
+});
+
+test("shows the shell title and keyboard hints at a narrow width", async () => {
+  const client = { getDashboard: async () => appDashboard };
+  const setup = await renderApp(client, 48);
+
+  await act(async () => {
+    await setup.waitForFrame((frame) => frame.includes("Run tests"));
+    await setup.waitForVisualIdle({ quietFrames: 2 });
+  });
+
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("Dashboard");
+  expect(frame).toContain("[r]");
   await destroy(setup as never);
 });
