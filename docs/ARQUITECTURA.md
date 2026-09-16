@@ -84,7 +84,17 @@ proyecto; una instancia Colibri se registra inicialmente con capacidad uno.
 
 La TUI de TRAMA consume los mismos servicios que la CLI: estado, proyectos,
 tareas, agentes derivados, eventos de auditoría y candidatos visibles. No crea
-estado paralelo ni acciones que no existan en el gateway.
+estado paralelo ni acciones que no existan en el gateway. La implementación
+TypeScript usa OpenTUI como único renderer interactivo y organiza la vista en
+un `AppShell`, un rail de navegación, paneles reutilizables y overlays de
+command palette/confirmación. Ink, Chalk, cli-table3, ora y yoctocolors quedan
+disponibles para utilidades CLI, pero no se montan dentro del árbol OpenTUI.
+
+El shell conserva la última proyección válida durante un fallo de refresh y la
+marca como obsoleta, manteniendo visible el contexto para diagnóstico. El
+polling se pausa mientras un overlay solicita una decisión. Aprobar, cancelar o
+reintentar una tarea requiere confirmación contextual y solo después ejecuta el
+POST correspondiente; un error se presenta como aviso recuperable.
 
 Los requisitos se descomponen en fases y tareas con trazabilidad explícita.
 Hermes actúa como planificador asistido por MCP: registra el requisito,

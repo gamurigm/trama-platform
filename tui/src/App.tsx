@@ -20,6 +20,7 @@ import { EventsScreen } from "./screens/EventsScreen";
 import { MemoryScreen } from "./screens/MemoryScreen";
 import { HealthScreen } from "./screens/HealthScreen";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
+import { ProjectPicker } from "./ui/ProjectPicker";
 
 type AppState =
   | { status: "loading" }
@@ -125,6 +126,11 @@ export function App({ client, pollMs = 2000 }: { client: TramaApiClient; pollMs?
     return () => { cancelled = true; };
   }, [client, navigation.projectId, navigation.screen]);
 
+  useEffect(() => {
+    if (navigation.overlay !== "project-picker" || screenData.projects) return;
+    void client.listProjects().then((projects) => setScreenData((current) => ({ ...current, projects }))).catch(() => undefined);
+  }, [client, navigation.overlay, screenData.projects]);
+
   useKeyboard((key) => {
     const name = String(key.name);
     const sequence = String(key.sequence);
@@ -199,6 +205,7 @@ export function App({ client, pollMs = 2000 }: { client: TramaApiClient; pollMs?
         />
       </box>
       {navigation.overlay === "palette" ? <CommandPalette commands={commands} onChoose={(command) => command.screen && setNavigation((current) => reduceNavigation(current, { type: "open-screen", screen: command.screen as ScreenId }))} onClose={() => setNavigation((current) => reduceNavigation(current, { type: "close-overlay" }))} /> : null}
+      {navigation.overlay === "project-picker" ? <ProjectPicker projects={screenData.projects ?? []} onChoose={(project) => { setNavigation((current) => reduceNavigation(current, { type: "set-project", projectId: project.project_id })); setNavigation((current) => reduceNavigation(current, { type: "close-overlay" })); }} onClose={() => setNavigation((current) => reduceNavigation(current, { type: "close-overlay" }))} /> : null}
       {navigation.overlay === "confirm" && pendingAction ? <ConfirmDialog action={pendingAction.action} target={pendingAction.taskId} consequence="La operación se enviará a la API y puede cambiar el estado de la tarea." onConfirm={() => void executeTaskAction()} onCancel={() => { setPendingAction(undefined); setNavigation((current) => reduceNavigation(current, { type: "close-overlay" })); }} /> : null}
       {navigation.notice ? <text fg={navigation.notice.kind === "error" ? colors.danger : colors.focus}>{navigation.notice.message}</text> : null}
     </box>

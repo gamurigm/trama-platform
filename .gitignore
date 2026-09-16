@@ -16,3 +16,4 @@ build/
 artifacts/
 secrets/
 .worktrees/
+tui/node_modules/

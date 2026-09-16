@@ -78,6 +78,31 @@ La TUI usa `TRAMA_API_URL` para seleccionar la API; si no se define, utiliza
 `http://127.0.0.1:8090`. `trama tui` permanece disponible como fallback de la
 TUI Python.
 
+La TUI TypeScript es un cockpit operativo OpenTUI. Su dashboard reúne Projects,
+Tasks, Agents, Queues, Workers, Events, Memory y System health sin duplicar el
+estado de la API. La paleta de comandos se abre con `/`; también acepta `↑/↓`
+o `j/k` y números `1-9` para elegir una vista.
+
+Atajos principales:
+
+| Tecla | Acción |
+| --- | --- |
+| `j/k`, `↑/↓` | mover selección |
+| `Enter` | abrir detalle o elegir comando |
+| `/` | abrir command palette |
+| `p` | cambiar contexto de proyecto |
+| `f` | iniciar filtro |
+| `r` | actualizar |
+| `a` | aprobar tarea seleccionada, con confirmación |
+| `x` | cancelar tarea seleccionada, con confirmación |
+| `y` | reintentar tarea seleccionada, con confirmación |
+| `Esc` | cerrar overlay o cancelar |
+| `q` | salir |
+
+Si una actualización falla después de cargar datos válidos, la TUI conserva la
+última proyección y muestra `Datos obsoletos`; `r` permite reintentar. Las
+acciones destructivas no se envían hasta confirmar con `y` o `Enter`.
+
 El estado del control plane se guarda en `TRAMA_STATE_DIR/trama.db`. `trama
 down` solo detiene el proceso API cuyo PID fue registrado por `trama up`.
 La coordinación usa memoria local por defecto para pruebas; para despachar
