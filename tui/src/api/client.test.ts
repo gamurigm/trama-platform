@@ -126,3 +126,41 @@ test("rejects invalid field types in overview and tasks collections", async () =
   await expect(invalidOverview.getDashboard()).rejects.toMatchObject({ endpoint: "/v1/overview" });
   await expect(invalidTasks.getTasks()).rejects.toMatchObject({ endpoint: "/v1/tasks" });
 });
+
+test("lists projects and reads the public health endpoint", async () => {
+  const client = new TramaApiClient(baseUrl, fakeFetch({
+    projects: [{ project_id: "demo", repository: "repo-a" }],
+  }));
+  const healthClient = new TramaApiClient(baseUrl, (async () => Response.json({
+    status: "ok",
+    service: "trama",
+  })) as unknown as typeof fetch);
+
+  await expect(client.listProjects()).resolves.toEqual([{ project_id: "demo", repository: "repo-a" }]);
+  await expect(healthClient.getHealth()).resolves.toEqual({ status: "ok", service: "trama" });
+});
+
+test("loads bounded events and logs with project filters", async () => {
+  const requests: Request[] = [];
+  const client = new TramaApiClient(baseUrl, fakeFetch({
+    events: [{ action: "task.accept", status: "accepted" }],
+    logs: [{ project_id: "demo", message: "ready", correlation_id: "corr-1" }],
+  }, requests));
+
+  await expect(client.listEvents(12)).resolves.toEqual([{ action: "task.accept", status: "accepted" }]);
+  await expect(client.listLogs({ projectId: "demo", taskId: "task-1", limit: 8 })).resolves.toEqual([
+    { project_id: "demo", message: "ready", correlation_id: "corr-1" },
+  ]);
+  expect(new URL(requests[0]?.url ?? "http://invalid").search).toBe("?limit=12");
+  expect(new URL(requests[1]?.url ?? "http://invalid").search).toBe("?project_id=demo&task_id=task-1&limit=8");
+});
+
+test("loads a task timeline with a bounded limit", async () => {
+  const client = new TramaApiClient(baseUrl, fakeFetch({
+    "tasks/task-1/timeline": [{ entry_id: "event-1", kind: "event", sequence: 1, actor: "system" }],
+  }));
+
+  await expect(client.getTaskTimeline("task-1", 20)).resolves.toEqual([
+    { entry_id: "event-1", kind: "event", sequence: 1, actor: "system" },
+  ]);
+});

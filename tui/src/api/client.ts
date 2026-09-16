@@ -1,4 +1,17 @@
-import type { Agent, DashboardData, Overview, Phase, Status, Task } from "./types";
+import type {
+  Agent,
+  DashboardData,
+  HealthStatus,
+  LogQuery,
+  OperationEvent,
+  Overview,
+  Phase,
+  ProjectManifest,
+  Status,
+  Task,
+  TaskLog,
+  TimelineEntry,
+} from "./types";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -90,7 +103,79 @@ function status(value: Record<string, unknown>, endpoint: string): Status {
   optionalNumber(value, "projects", endpoint);
   optionalNumber(value, "queue_depth", endpoint);
   optionalNumber(value, "active_dispatches", endpoint);
+  optionalNumber(value, "queue_capacity", endpoint);
+  optionalNumber(value, "max_concurrency", endpoint);
+  optionalString(value, "dispatcher_status", endpoint);
+  optionalNumber(value, "results", endpoint);
   return value as Status;
+}
+
+function health(value: Record<string, unknown>, endpoint: string): HealthStatus {
+  requiredString(value, "status", endpoint);
+  requiredString(value, "service", endpoint);
+  return value as HealthStatus;
+}
+
+function project(value: Record<string, unknown>, endpoint: string): ProjectManifest {
+  requiredString(value, "project_id", endpoint);
+  requiredString(value, "repository", endpoint);
+  optionalString(value, "organization_id", endpoint);
+  optionalString(value, "default_branch", endpoint);
+  return value as ProjectManifest;
+}
+
+function event(value: Record<string, unknown>, endpoint: string): OperationEvent {
+  requiredString(value, "action", endpoint);
+  requiredString(value, "status", endpoint);
+  optionalString(value, "event_id", endpoint);
+  optionalString(value, "actor", endpoint);
+  optionalString(value, "project_id", endpoint);
+  optionalString(value, "task_id", endpoint);
+  optionalString(value, "created_at", endpoint);
+  return value as OperationEvent;
+}
+
+function log(value: Record<string, unknown>, endpoint: string): TaskLog {
+  requiredString(value, "message", endpoint);
+  requiredString(value, "project_id", endpoint);
+  requiredString(value, "correlation_id", endpoint);
+  optionalString(value, "log_id", endpoint);
+  optionalString(value, "created_at", endpoint);
+  optionalString(value, "level", endpoint);
+  optionalString(value, "task_id", endpoint);
+  return value as TaskLog;
+}
+
+function timeline(value: Record<string, unknown>, endpoint: string): TimelineEntry {
+  requiredString(value, "entry_id", endpoint);
+  requiredString(value, "kind", endpoint);
+  requiredNumber(value, "sequence", endpoint);
+  requiredString(value, "actor", endpoint);
+  optionalString(value, "created_at", endpoint);
+  optionalString(value, "action", endpoint);
+  optionalString(value, "status", endpoint);
+  optionalString(value, "message", endpoint);
+  optionalString(value, "task_id", endpoint);
+  return value as TimelineEntry;
+}
+
+function requiredNumber(value: Record<string, unknown>, field: string, endpoint: string): void {
+  if (typeof value[field] !== "number") {
+    invalidPayload(endpoint, `Expected ${field} to be a number`);
+  }
+}
+
+function boundedLimit(limit: number | undefined): number {
+  return Math.max(1, Math.min(1000, Math.trunc(limit ?? 100)));
+}
+
+function addQuery(endpoint: string, entries: Array<[string, string | number | undefined]>): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of entries) {
+    if (value !== undefined) query.set(key, String(value));
+  }
+  const encoded = query.toString();
+  return encoded ? `${endpoint}?${encoded}` : endpoint;
 }
 
 function overview(value: Record<string, unknown>, endpoint: string): Overview {
@@ -117,8 +202,42 @@ export class TramaApiClient {
     return status(await this.getObject("/v1/status"), "/v1/status");
   }
 
-  async getOverview(): Promise<Overview> {
-    return overview(await this.getObject("/v1/overview"), "/v1/overview");
+  async getOverview(projectId?: string): Promise<Overview> {
+    const endpoint = addQuery("/v1/overview", [["project_id", projectId]]);
+    return overview(await this.getObject(endpoint), "/v1/overview");
+  }
+
+  async listProjects(): Promise<ProjectManifest[]> {
+    const endpoint = "/v1/projects";
+    return collection(await this.getJson(endpoint), "projects", endpoint, project);
+  }
+
+  async getHealth(): Promise<HealthStatus> {
+    const endpoint = "/health";
+    return health(await this.getObject(endpoint), endpoint);
+  }
+
+  async listEvents(limit = 100): Promise<OperationEvent[]> {
+    const endpoint = addQuery("/v1/events", [["limit", boundedLimit(limit)]]);
+    return collection(await this.getJson(endpoint), "events", "/v1/events", event);
+  }
+
+  async listLogs(params: LogQuery = {}): Promise<TaskLog[]> {
+    const endpoint = addQuery("/v1/logs", [
+      ["organization_id", params.organizationId],
+      ["project_id", params.projectId],
+      ["task_id", params.taskId],
+      ["phase_id", params.phaseId],
+      ["requirement_id", params.requirementId],
+      ["level", params.level],
+      ["limit", boundedLimit(params.limit)],
+    ]);
+    return collection(await this.getJson(endpoint), "logs", "/v1/logs", log);
+  }
+
+  async getTaskTimeline(taskId: string, limit = 100): Promise<TimelineEntry[]> {
+    const endpoint = addQuery(`/v1/tasks/${encodeURIComponent(taskId)}/timeline`, [["limit", boundedLimit(limit)]]);
+    return collection(await this.getJson(endpoint), "timeline", "/v1/tasks/:taskId/timeline", timeline);
   }
 
   async getTasks(): Promise<Task[]> {
