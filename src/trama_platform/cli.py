@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 
+from .adapters import CcccCliAdapter
 from .api import create_app
 from .contracts import (
     AgentResult,
@@ -34,6 +35,8 @@ from .settings import TramaSettings
 from .storage import build_state_store
 from .utopia_mcp import UtopiaMcpAdapter
 from .worker import run_task_worker
+
+__all__ = ["CcccCliAdapter", "build_coordination", "main"]
 
 CONTRACTS = {
     "project-manifest": ProjectManifest,
