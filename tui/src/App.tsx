@@ -144,6 +144,15 @@ export function App({ client, pollMs = 2000 }: { client: TramaApiClient; pollMs?
     }
     if (normalizedName === "r") void refresh();
     if (normalizedName === "q") renderer.destroy();
+    if (normalizedName === "down" || normalizedName === "arrowdown" || normalizedName === "j" || normalizedName === "up" || normalizedName === "arrowup" || normalizedName === "k") {
+      const direction = normalizedName === "up" || normalizedName === "arrowup" || normalizedName === "k" ? -1 : 1;
+      setNavigation((current) => {
+        const currentIndex = screenIds.indexOf(current.screen);
+        const nextScreen = screenIds[(currentIndex + direction + screenIds.length) % screenIds.length] ?? "dashboard";
+        return reduceNavigation(current, { type: "open-screen", screen: nextScreen });
+      });
+      return;
+    }
     if (normalizedName === "a" || normalizedName === "x" || normalizedName === "y") {
       requestTaskAction(normalizedName === "a" ? "approve" : normalizedName === "x" ? "cancel" : "retry");
     }

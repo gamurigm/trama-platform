@@ -252,6 +252,19 @@ test("opens the command palette with slash", async () => {
   await destroy(setup as never);
 });
 
+test("moves between shell screens with arrow keys", async () => {
+  const client = { getDashboard: async () => appDashboard };
+  const setup = await renderApp(client, 100);
+  await act(async () => { await setup.waitForFrame((frame) => frame.includes("Run tests")); });
+  setup.mockInput.pressArrow("down");
+  await setup.waitForFrame((frame) => frame.includes("TRAMA  ·  Projects"));
+  expect(setup.captureCharFrame()).toContain("Projects");
+  setup.mockInput.pressArrow("up");
+  await setup.waitForFrame((frame) => frame.includes("TRAMA  ·  Dashboard"));
+  expect(setup.captureCharFrame()).toContain("Dashboard");
+  await destroy(setup as never);
+});
+
 test("shows the shell title and keyboard hints at a narrow width", async () => {
   const client = { getDashboard: async () => appDashboard };
   const setup = await renderApp(client, 48);
