@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import os
+import time
 from uuid import uuid4
 
 import pytest
 
-from trama_platform.contracts import OperationEvent, ProjectManifest, TaskEnvelope
+from trama_platform.contracts import AgentResult, OperationEvent, ProjectManifest, TaskEnvelope
 from trama_platform.runtime import TramaRuntime
 from trama_platform.state_store import PostgresStateStore
 
@@ -73,5 +74,78 @@ def test_postgres_persists_task_transition_event_fields() -> None:
 
     store.save_task_transition(task, event)
 
-    assert store.load_tasks()[-1] == task
+    assert next(item for item in store.load_tasks() if item.task_id == task.task_id) == task
     assert store.list_events(limit=1)[0].action == "task.dispatch"
+
+
+def test_postgres_leases_are_namespace_aware_and_expired_leases_are_reclaimed() -> None:
+    task_id = f"task-{uuid4().hex}"
+    task_a = _task(f"test-org-a-{uuid4().hex}", "shared-project", task_id)
+    task_b = _task(f"test-org-b-{uuid4().hex}", "shared-project", task_id)
+    store = PostgresStateStore(POSTGRES_URL)
+
+    first = store.claim_task(task_a, owner_id="worker-a", lease_seconds=1)
+    assert first is not None
+    assert store.claim_task(task_a, owner_id="worker-b", lease_seconds=1) is None
+    other_namespace = store.claim_task(task_b, owner_id="worker-b", lease_seconds=1)
+    assert other_namespace is not None
+
+    time.sleep(1.1)
+    reclaimed = store.claim_task(task_a, owner_id="worker-b", lease_seconds=30)
+
+    assert reclaimed is not None
+    assert reclaimed.owner_id == "worker-b"
+    assert reclaimed.attempt == first.attempt + 1
+
+
+def test_postgres_rejects_stale_result_after_lease_reclaim() -> None:
+    task = _task(f"test-org-{uuid4().hex}", "shared-project", f"task-{uuid4().hex}")
+    store = PostgresStateStore(POSTGRES_URL)
+    store.save_task(task)
+    first = store.claim_task(task, owner_id="worker-a", lease_seconds=1)
+    assert first is not None
+    first_running = task.model_copy(
+        update={"state": "running", "execution_attempt": first.attempt}
+    )
+    store.save_task_transition_if_lease_current(
+        first_running,
+        OperationEvent(
+            action="task.dispatch",
+            status="accepted",
+            organization_id=task.organization_id,
+            project_id=task.project_id,
+            task_id=task.task_id,
+        ),
+    )
+
+    time.sleep(1.1)
+    second = store.claim_task(task, owner_id="worker-b", lease_seconds=30)
+    assert second is not None
+    second_running = first_running.model_copy(
+        update={"execution_attempt": second.attempt}
+    )
+    store.save_task_transition_if_lease_current(
+        second_running,
+        OperationEvent(
+            action="task.dispatch",
+            status="accepted",
+            organization_id=task.organization_id,
+            project_id=task.project_id,
+            task_id=task.task_id,
+        ),
+    )
+
+    stale = AgentResult(
+        task_id=task.task_id,
+        execution_attempt=first.attempt,
+        status="succeeded",
+        summary="stale result",
+        organization_id=task.organization_id,
+    )
+    assert store.save_task_result(first_running.model_copy(update={"state": "succeeded"}), stale) is False
+
+    current = stale.model_copy(
+        update={"execution_attempt": second.attempt, "summary": "current result"}
+    )
+    assert store.save_task_result(second_running.model_copy(update={"state": "succeeded"}), current)
+    assert store.is_task_lease_current(second) is False
