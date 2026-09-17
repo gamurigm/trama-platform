@@ -10,7 +10,6 @@ from trama_platform.contracts import AgentResult, OperationEvent, ProjectManifes
 from trama_platform.runtime import TramaRuntime
 from trama_platform.state_store import PostgresStateStore
 
-
 POSTGRES_URL = os.getenv("TRAMA_TEST_POSTGRES_URL")
 pytestmark = pytest.mark.skipif(
     not POSTGRES_URL,
@@ -48,9 +47,7 @@ def test_postgres_registers_project_and_persists_operation_event() -> None:
 
     project = runtime.register_project(_project(organization_id, project_id))
 
-    assert next(
-        item for item in store.load_projects() if item.project_id == project_id
-    ) == project
+    assert next(item for item in store.load_projects() if item.project_id == project_id) == project
     event = store.list_events(limit=1)[0]
     assert event.action == "project.register"
     assert event.status == "accepted"
@@ -104,9 +101,7 @@ def test_postgres_rejects_stale_result_after_lease_reclaim() -> None:
     store.save_task(task)
     first = store.claim_task(task, owner_id="worker-a", lease_seconds=1)
     assert first is not None
-    first_running = task.model_copy(
-        update={"state": "running", "execution_attempt": first.attempt}
-    )
+    first_running = task.model_copy(update={"state": "running", "execution_attempt": first.attempt})
     store.save_task_transition_if_lease_current(
         first_running,
         OperationEvent(
@@ -121,9 +116,7 @@ def test_postgres_rejects_stale_result_after_lease_reclaim() -> None:
     time.sleep(1.1)
     second = store.claim_task(task, owner_id="worker-b", lease_seconds=30)
     assert second is not None
-    second_running = first_running.model_copy(
-        update={"execution_attempt": second.attempt}
-    )
+    second_running = first_running.model_copy(update={"execution_attempt": second.attempt})
     store.save_task_transition_if_lease_current(
         second_running,
         OperationEvent(
@@ -142,7 +135,12 @@ def test_postgres_rejects_stale_result_after_lease_reclaim() -> None:
         summary="stale result",
         organization_id=task.organization_id,
     )
-    assert store.save_task_result(first_running.model_copy(update={"state": "succeeded"}), stale) is False
+    assert (
+        store.save_task_result(
+            first_running.model_copy(update={"state": "succeeded"}), stale
+        )
+        is False
+    )
 
     current = stale.model_copy(
         update={"execution_attempt": second.attempt, "summary": "current result"}
