@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 def _read_int(name: str, default: int) -> int:
@@ -34,6 +35,24 @@ def _read_bool(name: str, default: bool) -> bool:
     if normalized in {"0", "false", "no", "off"}:
         return False
     raise ValueError(f"{name} debe ser booleano")
+
+
+def _read_url(name: str, default: str, *, allow_empty: bool = False) -> str:
+    value = os.getenv(name, default).strip()
+    if allow_empty and not value:
+        return ""
+    parsed = urlparse(value)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError(f"{name} debe ser una URL HTTP(S) con host")
+    return value
 
 
 def _default_hermes_config_path() -> str:
@@ -73,8 +92,8 @@ class TramaSettings:
     utopia_url: str | None = None
     utopia_kb_id: str | None = None
     utopia_token: str | None = None
-    colibri_url: str | None = None
-    colibri_model: str | None = None
+    colibri_url: str = "http://127.0.0.1:8020"
+    colibri_model: str = "OLMoE-1B-7B-0125-Instruct"
     nats_url: str = "nats://127.0.0.1:4222"
     nats_stream: str = "TRAMA_EVENTS"
     nats_subject: str = "trama.task.admitted.v1"
@@ -83,6 +102,14 @@ class TramaSettings:
     nats_max_deliver: int = 5
     hermes_executable: str = "hermes"
     hermes_config_path: str = "~/.hermes/config.yaml"
+    ollama_url: str = "http://127.0.0.1:11434"
+    ollama_model: str = "qwen3:8b"
+    ollama_url: str = "http://127.0.0.1:11434"
+    ollama_model: str = "qwen3:8b"
+    colibri_executable: str = "coli"
+    semantica_enabled: bool = False
+    semantica_executable: str = "semantica-mcp"
+    utopia_mcp_url: str = ""
 
     @property
     def state_path(self) -> Path:
@@ -110,7 +137,7 @@ class TramaSettings:
             require_tenant_context=_read_bool("TRAMA_REQUIRE_TENANT_CONTEXT", is_production),
             api_host=api_host,
             api_port=api_port,
-            api_url=os.getenv("TRAMA_API_URL", f"http://{api_host}:{api_port}"),
+            api_url=_read_url("TRAMA_API_URL", f"http://{api_host}:{api_port}"),
             api_token=os.getenv("TRAMA_API_TOKEN") or None,
             internal_service_token=os.getenv("TRAMA_INTERNAL_SERVICE_TOKEN") or None,
             gateway_url=os.getenv("TRAMA_GATEWAY_URL") or None,
@@ -125,11 +152,13 @@ class TramaSettings:
             ),
             task_lease_seconds=_read_positive_int("TRAMA_TASK_LEASE_SECONDS", 60),
             semantica_kg_path=os.getenv("TRAMA_SEMANTICA_KG_PATH") or None,
-            utopia_url=os.getenv("TRAMA_UTOPIA_URL") or None,
+            utopia_url=_read_url("TRAMA_UTOPIA_URL", "", allow_empty=True) or None,
             utopia_kb_id=os.getenv("TRAMA_UTOPIA_KB_ID") or None,
             utopia_token=os.getenv("TRAMA_UTOPIA_TOKEN") or None,
-            colibri_url=os.getenv("TRAMA_COLIBRI_URL") or None,
-            colibri_model=os.getenv("TRAMA_COLIBRI_MODEL") or None,
+            colibri_url=_read_url("TRAMA_COLIBRI_URL", "http://127.0.0.1:8020"),
+            colibri_model=os.getenv(
+                "TRAMA_COLIBRI_MODEL", "OLMoE-1B-7B-0125-Instruct"
+            ),
             nats_url=os.getenv("TRAMA_NATS_URL", "nats://127.0.0.1:4222"),
             nats_stream=os.getenv("TRAMA_NATS_STREAM", "TRAMA_EVENTS"),
             nats_subject=os.getenv("TRAMA_NATS_SUBJECT", "trama.task.admitted.v1"),
@@ -140,4 +169,12 @@ class TramaSettings:
             hermes_config_path=os.getenv(
                 "TRAMA_HERMES_CONFIG_PATH", _default_hermes_config_path()
             ),
+            ollama_url=_read_url("TRAMA_OLLAMA_URL", "http://127.0.0.1:11434"),
+            ollama_model=os.getenv("TRAMA_OLLAMA_MODEL", "qwen3:8b"),
+            colibri_executable=os.getenv("TRAMA_COLIBRI_EXECUTABLE", "coli"),
+            semantica_enabled=_read_bool("TRAMA_SEMANTICA_ENABLED", False),
+            semantica_executable=os.getenv(
+                "TRAMA_SEMANTICA_EXECUTABLE", "semantica-mcp"
+            ),
+            utopia_mcp_url=_read_url("TRAMA_UTOPIA_MCP_URL", "", allow_empty=True),
         )

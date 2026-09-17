@@ -65,6 +65,18 @@ trama knowledge validate candidate-1 --organization default --project demo --rev
 trama tui
 ```
 
+### servicios nativos configurados
+
+Consulta Ollama, Colibri, Utopia y TRAMA sin exponer credenciales:
+
+```powershell
+trama services status --json
+trama hermes configure --all
+```
+
+Los perfiles locales usan Ollama para tool-calling y Colibri/OLMoE para
+análisis; Utopia se incorpora solo cuando `TRAMA_UTOPIA_MCP_URL` está definido.
+
 ### TUI TypeScript
 
 Para iniciar la TUI TypeScript, levanta primero la API local y, desde la raíz
@@ -286,6 +298,8 @@ directorio absoluto de persistencia:
 ```powershell
 uv sync --extra integrations
 $env:TRAMA_SEMANTICA_KG_PATH = "C:\data\trama\semantica-context"
+$env:TRAMA_SEMANTICA_ENABLED = "true"
+$env:TRAMA_UTOPIA_MCP_URL = "http://127.0.0.1:1516"
 ```
 
 Semantica recomienda `AgentContext` nativo para código Python. Su servidor MCP

@@ -167,6 +167,20 @@
       "title": "State",
       "type": "string"
     },
+    "execution_attempt": {
+      "anyOf": [
+        {
+          "maximum": 1000000000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Execution Attempt"
+    },
     "acceptance_criteria": {
       "items": {
         "type": "string"

@@ -31,6 +31,7 @@ from .lifecycle import GatewaySupervisor
 from .mcp_server import TramaApiClient, TramaApiError, run_mcp
 from .project import load_project_manifest
 from .semantica_adapter import SemanticaContextAdapter
+from .services import collect_service_status
 from .settings import TramaSettings
 from .storage import build_state_store
 from .utopia_mcp import UtopiaMcpAdapter
@@ -133,6 +134,17 @@ def _add_control_commands(subparsers: argparse._SubParsersAction, settings: Tram
     status_parser = subparsers.add_parser("status", help="Muestra el estado del control plane")
     _add_api_options(status_parser, settings)
 
+    services_parser = subparsers.add_parser(
+        "services", help="Comprueba servicios nativos locales"
+    )
+    services_commands = services_parser.add_subparsers(
+        dest="services_command", required=True
+    )
+    services_status = services_commands.add_parser(
+        "status", help="Muestra el catálogo de servicios"
+    )
+    services_status.add_argument("--json", action="store_true", dest="as_json")
+
     doctor_parser = subparsers.add_parser("doctor", help="Comprueba la salud de TRAMA")
     _add_api_options(doctor_parser, settings)
 
@@ -227,6 +239,9 @@ def _add_control_commands(subparsers: argparse._SubParsersAction, settings: Tram
     hermes_check = hermes_commands.add_parser("check")
     hermes_check.add_argument("--json", action="store_true", dest="as_json")
     hermes_configure = hermes_commands.add_parser("configure")
+    hermes_configure.add_argument(
+        "--all", action="store_true", dest="include_native_services"
+    )
     hermes_configure.add_argument("--path", default=settings.hermes_config_path)
     hermes_configure.add_argument("--api-url", default=settings.api_url)
     hermes_configure.add_argument("--json", action="store_true", dest="as_json")
@@ -259,6 +274,10 @@ def _run_control_command(args: argparse.Namespace) -> None:
 
     if args.command == "status":
         _emit(TramaApiClient(args.api_url).get_status(), as_json=args.as_json)
+        return
+
+    if args.command == "services" and args.services_command == "status":
+        _emit(collect_service_status(TramaSettings.from_env()), as_json=args.as_json)
         return
 
     if args.command == "doctor":
@@ -409,7 +428,15 @@ def _run_control_command(args: argparse.Namespace) -> None:
         if args.hermes_command == "check":
             _emit(adapter.check(), as_json=args.as_json)
         elif args.hermes_command == "configure":
-            path = adapter.write_config(Path(args.path).expanduser(), args.api_url)
+            if args.include_native_services:
+                path = adapter.write_config(
+                    Path(args.path).expanduser(),
+                    args.api_url,
+                    settings=settings,
+                    include_native_services=True,
+                )
+            else:
+                path = adapter.write_config(Path(args.path).expanduser(), args.api_url)
             _emit({"status": "written", "path": str(path)}, as_json=args.as_json)
         else:
             raise SystemExit(adapter.run(args.hermes_args))
@@ -491,6 +518,7 @@ def main() -> None:
         "up",
         "down",
         "status",
+        "services",
         "doctor",
         "project",
         "task",

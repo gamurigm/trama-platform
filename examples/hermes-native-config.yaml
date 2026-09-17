@@ -1,0 +1,58 @@
+approvals:
+  mode: manual
+  timeout: 300
+  cron_mode: deny
+  single_query_mode: deny
+  unattended_mode: deny
+
+model:
+  default: qwen3:8b
+  provider: custom
+  base_url: http://127.0.0.1:11434/v1
+  api_key: local
+
+custom_providers:
+  - name: ollama
+    base_url: http://127.0.0.1:11434/v1
+    api_key: local
+    models:
+      - qwen3:8b
+  - name: colibri
+    base_url: http://127.0.0.1:8020/v1
+    api_key: local
+    models:
+      - OLMoE-1B-7B-0125-Instruct
+
+mcp_servers:
+  trama:
+    command: uv
+    args:
+      - run
+      - --project
+      - .
+      - trama
+      - mcp
+      - --api-url
+      - http://127.0.0.1:8090
+    timeout: 30
+    connect_timeout: 10
+    tools:
+      include:
+        - trama_register_project
+        - trama_search_context
+        - trama_submit_task
+        - trama_record_result
+        - trama_capture_memory
+      resources: false
+      prompts: false
+
+  semantica:
+    type: stdio
+    command: semantica-mcp
+    args: []
+
+  utopia:
+    type: streamable-http
+    url: http://127.0.0.1:1516/api/v1/kbs/local/mcp
+    headers:
+      Authorization: "Bearer ${UTOPIA_API_TOKEN}"

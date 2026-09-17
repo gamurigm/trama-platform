@@ -27,6 +27,7 @@ from .contracts import (
 from .ports import CanonicalKnowledgePort, ContextMemoryPort, CoordinationPort, StateStorePort
 from .queueing import QueueCapacityError
 from .runtime import TramaRuntime
+from .services import collect_service_status
 from .settings import TramaSettings
 
 
@@ -39,6 +40,7 @@ def create_app(
     state_store: StateStorePort | None = None,
     settings: TramaSettings | None = None,
 ) -> FastAPI:
+    settings_instance = settings or TramaSettings.from_env()
     if settings and settings.is_production and runtime is None and state_store is None:
         raise ValueError("state_store es obligatorio en produccion")
     runtime_instance = runtime or TramaRuntime(
@@ -46,10 +48,10 @@ def create_app(
         context_memory=context_memory,
         canonical_knowledge=canonical_knowledge,
         state_store=state_store,
-        queue_capacity=settings.queue_capacity if settings else 100,
-        max_concurrency=settings.max_concurrency if settings else 4,
+        queue_capacity=settings_instance.queue_capacity,
+        max_concurrency=settings_instance.max_concurrency,
         dispatch_timeout_seconds=(
-            settings.dispatch_timeout_seconds if settings else 900
+            settings_instance.dispatch_timeout_seconds
         ),
         lease_seconds=settings.task_lease_seconds if settings else 60,
     )
@@ -61,6 +63,7 @@ def create_app(
 
     app = FastAPI(title="TRAMA", version="0.1.0", lifespan=lifespan)
     app.state.runtime = runtime_instance
+    app.state.settings = settings_instance
     configured_store = state_store or getattr(runtime_instance, "state_store", None)
 
     tenant_context_required = bool(
@@ -248,6 +251,10 @@ def create_app(
     @app.get("/v1/status")
     def status() -> dict[str, object]:
         return app.state.runtime.status()
+
+    @app.get("/v1/services")
+    def services() -> dict[str, object]:
+        return collect_service_status(app.state.settings)
 
     @app.get("/v1/projects", response_model=list[ProjectManifest])
     def list_projects(request: Request) -> list[ProjectManifest]:

@@ -109,6 +109,59 @@ def test_queue_settings_have_safe_defaults(monkeypatch):
     assert settings.task_lease_seconds == 60
 
 
+def test_settings_loads_native_service_values_from_environment(monkeypatch):
+    monkeypatch.setenv("TRAMA_OLLAMA_URL", "http://127.0.0.1:11435")
+    monkeypatch.setenv("TRAMA_OLLAMA_MODEL", "qwen3:4b")
+    monkeypatch.setenv("TRAMA_COLIBRI_URL", "http://127.0.0.1:8021")
+    monkeypatch.setenv("TRAMA_COLIBRI_MODEL", "olmoe-test")
+    monkeypatch.setenv("TRAMA_COLIBRI_EXECUTABLE", "coli-test")
+    monkeypatch.setenv("TRAMA_SEMANTICA_ENABLED", "true")
+    monkeypatch.setenv("TRAMA_SEMANTICA_EXECUTABLE", "semantica-test")
+    monkeypatch.setenv("TRAMA_UTOPIA_URL", "https://127.0.0.1:1517")
+    monkeypatch.setenv(
+        "TRAMA_UTOPIA_MCP_URL",
+        "https://127.0.0.1:1517/api/v1/kbs/local/mcp",
+    )
+
+    settings = TramaSettings.from_env()
+
+    assert settings.ollama_url == "http://127.0.0.1:11435"
+    assert settings.ollama_model == "qwen3:4b"
+    assert settings.colibri_url == "http://127.0.0.1:8021"
+    assert settings.colibri_model == "olmoe-test"
+    assert settings.colibri_executable == "coli-test"
+    assert settings.semantica_enabled is True
+    assert settings.semantica_executable == "semantica-test"
+    assert settings.utopia_url == "https://127.0.0.1:1517"
+    assert settings.utopia_mcp_url == "https://127.0.0.1:1517/api/v1/kbs/local/mcp"
+
+
+def test_settings_uses_exact_olmoe_colibri_default(monkeypatch):
+    monkeypatch.delenv("TRAMA_COLIBRI_MODEL", raising=False)
+
+    settings = TramaSettings.from_env()
+
+    assert settings.colibri_model == "OLMoE-1B-7B-0125-Instruct"
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("TRAMA_OLLAMA_URL", "127.0.0.1:11434"),
+        ("TRAMA_COLIBRI_URL", "ftp://127.0.0.1:8020"),
+        ("TRAMA_UTOPIA_MCP_URL", "http://"),
+        ("TRAMA_OLLAMA_URL", "http://user:password@127.0.0.1:11434"),
+        ("TRAMA_COLIBRI_URL", "http://127.0.0.1:8020/path?token=secret"),
+        ("TRAMA_UTOPIA_URL", "http://127.0.0.1:1516/path#fragment"),
+    ],
+)
+def test_settings_rejects_non_http_service_urls(monkeypatch, name, value):
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(ValueError, match=name):
+        TramaSettings.from_env()
+
+
 @pytest.mark.parametrize(
     "name",
     [

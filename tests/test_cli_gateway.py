@@ -168,6 +168,79 @@ def test_cli_hermes_configure_writes_profile(monkeypatch, tmp_path, capsys):
     }
 
 
+def test_cli_services_status_emits_catalog_even_when_optional_services_are_down(
+    monkeypatch, capsys
+):
+    cli = importlib.import_module("trama_platform.cli")
+    expected = {
+        "status": "unavailable",
+        "services": [
+            {
+                "id": "ollama",
+                "status": "unavailable",
+                "kind": "http",
+                "message": "endpoint no disponible",
+            }
+        ],
+    }
+    observed = []
+
+    def fake_collect_service_status(settings):
+        observed.append(settings)
+        return expected
+
+    monkeypatch.setattr(cli, "collect_service_status", fake_collect_service_status)
+    monkeypatch.setattr(sys, "argv", ["trama", "services", "status", "--json"])
+
+    cli.main()
+
+    assert json.loads(capsys.readouterr().out) == expected
+    assert observed[0].ollama_model == "qwen3:8b"
+
+
+def test_cli_hermes_configure_all_passes_native_profile(monkeypatch, tmp_path, capsys):
+    cli = importlib.import_module("trama_platform.cli")
+    calls = []
+
+    class FakeHermes:
+        def __init__(self, executable, **kwargs):
+            pass
+
+        def write_config(self, path, api_url, **kwargs):
+            calls.append((path, api_url, kwargs))
+            return path
+
+    monkeypatch.setattr(cli, "HermesAdapter", FakeHermes)
+    output = tmp_path / "hermes-native.yaml"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "trama",
+            "hermes",
+            "configure",
+            "--all",
+            "--path",
+            str(output),
+            "--api-url",
+            "http://trama.test",
+            "--json",
+        ],
+    )
+
+    cli.main()
+
+    assert len(calls) == 1
+    assert calls[0][0] == output
+    assert calls[0][1] == "http://trama.test"
+    assert calls[0][2]["include_native_services"] is True
+    assert isinstance(calls[0][2]["settings"], cli.TramaSettings)
+    assert json.loads(capsys.readouterr().out) == {
+        "status": "written",
+        "path": str(output),
+    }
+
+
 def test_cli_up_and_down_delegate_to_gateway_supervisor(monkeypatch, capsys):
     cli = importlib.import_module("trama_platform.cli")
     operations = []
