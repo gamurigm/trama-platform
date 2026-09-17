@@ -106,6 +106,17 @@ def create_app(
                 detail="El proyecto del request no esta autorizado",
             )
 
+    def ensure_memory_namespace(
+        request: Request, organization_id: str, project_id: str
+    ) -> str:
+        request_organization_id = request_organization(request)
+        if request_organization_id is None:
+            return organization_id
+        if organization_id not in {"default", request_organization_id}:
+            raise HTTPException(status_code=403, detail="Organizacion no autorizada")
+        ensure_path_namespace(request, project_id)
+        return request_organization_id
+
     def visible_items(request: Request, items: list[object]) -> list[object]:
         if not tenant_context_required:
             return items
@@ -527,12 +538,7 @@ def create_app(
         organization_id: str = Query(default="default", min_length=1),
         project_id: str = Query(min_length=1),
     ) -> list[MemoryCandidate]:
-        if tenant_context_required:
-            context = request_context(request)
-            if organization_id not in {"default", context.organization_id}:
-                raise HTTPException(status_code=403, detail="Organizacion no autorizada")
-            organization_id = context.organization_id
-            ensure_path_namespace(request, project_id)
+        organization_id = ensure_memory_namespace(request, organization_id, project_id)
         try:
             return app.state.runtime.list_memory_candidates(organization_id, project_id)
         except KeyError as exc:
@@ -542,10 +548,12 @@ def create_app(
 
     @app.get("/v1/memory/candidates/{candidate_id}", response_model=MemoryCandidate)
     def get_memory_candidate(
+        request: Request,
         candidate_id: str,
         organization_id: str = Query(min_length=1),
         project_id: str = Query(min_length=1),
     ) -> MemoryCandidate:
+        organization_id = ensure_memory_namespace(request, organization_id, project_id)
         try:
             return app.state.runtime.get_memory_candidate(
                 candidate_id, organization_id=organization_id, project_id=project_id
@@ -555,11 +563,13 @@ def create_app(
 
     @app.post("/v1/memory/candidates/{candidate_id}/validate", response_model=MemoryCandidate)
     def validate_memory_candidate(
+        request: Request,
         candidate_id: str,
         payload: dict[str, str],
         organization_id: str = Query(min_length=1),
         project_id: str = Query(min_length=1),
     ) -> MemoryCandidate:
+        organization_id = ensure_memory_namespace(request, organization_id, project_id)
         try:
             return app.state.runtime.review_memory_candidate(
                 candidate_id,
@@ -575,11 +585,13 @@ def create_app(
 
     @app.post("/v1/memory/candidates/{candidate_id}/reject", response_model=MemoryCandidate)
     def reject_memory_candidate(
+        request: Request,
         candidate_id: str,
         payload: dict[str, str],
         organization_id: str = Query(min_length=1),
         project_id: str = Query(min_length=1),
     ) -> MemoryCandidate:
+        organization_id = ensure_memory_namespace(request, organization_id, project_id)
         try:
             return app.state.runtime.review_memory_candidate(
                 candidate_id,

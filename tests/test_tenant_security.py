@@ -189,3 +189,67 @@ def test_production_reads_resolve_same_ids_inside_the_request_organization():
         assert task.status_code == 200
         assert task.json()["organization_id"] == organization_id
         assert task.json()["repository"] == repository
+
+
+def test_production_memory_read_cannot_override_request_organization():
+    runtime = TramaRuntime()
+    client = TestClient(create_app(runtime, settings=_settings()))
+    assert client.post(
+        "/v1/projects",
+        headers=_headers("org-a"),
+        json={"project_id": "demo", "organization_id": "org-a", "repository": "repo-a"},
+    ).status_code == 201
+    candidate = {
+        "candidate_id": "candidate-a",
+        "organization_id": "org-a",
+        "project_id": "demo",
+        "subject": "private",
+        "fact": "org-a fact",
+        "evidence": [{"source": "test", "locator": "run/1"}],
+        "confidence": 1,
+    }
+    assert client.post(
+        "/v1/memory/candidates",
+        headers=_headers("org-a"),
+        json=candidate,
+    ).status_code == 201
+
+    response = client.get(
+        "/v1/memory/candidates/candidate-a?organization_id=org-a&project_id=demo",
+        headers=_headers("org-b"),
+    )
+
+    assert response.status_code == 403
+
+
+def test_production_memory_review_cannot_override_request_organization():
+    runtime = TramaRuntime()
+    client = TestClient(create_app(runtime, settings=_settings()))
+    assert client.post(
+        "/v1/projects",
+        headers=_headers("org-a"),
+        json={"project_id": "demo", "organization_id": "org-a", "repository": "repo-a"},
+    ).status_code == 201
+    candidate = {
+        "candidate_id": "candidate-a",
+        "organization_id": "org-a",
+        "project_id": "demo",
+        "subject": "private",
+        "fact": "org-a fact",
+        "evidence": [{"source": "test", "locator": "run/1"}],
+        "confidence": 1,
+    }
+    assert client.post(
+        "/v1/memory/candidates",
+        headers=_headers("org-a"),
+        json=candidate,
+    ).status_code == 201
+
+    response = client.post(
+        "/v1/memory/candidates/candidate-a/validate"
+        "?organization_id=org-a&project_id=demo",
+        headers=_headers("org-b"),
+        json={"reviewer": "attacker"},
+    )
+
+    assert response.status_code == 403
