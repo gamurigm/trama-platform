@@ -20,7 +20,7 @@ services:
 
   nats:
     image: nats:2.11-alpine
-    command: ["-js", "-sd", "/data"]
+    command: ["-js", "-sd", "/data", "-m", "8222"]
     ports:
       - "127.0.0.1:4222:4222"
       - "127.0.0.1:8222:8222"
@@ -41,6 +41,8 @@ services:
       dockerfile: gateway/Dockerfile
       args:
         TRAMA_BINARY: trama-gateway
+      secrets:
+        - trama-ca
     environment:
       TRAMA_GATEWAY_ADDR: ":8080"
       TRAMA_DATABASE_URL: postgresql://trama:trama-local-only@postgres:5432/trama?sslmode=disable
@@ -63,6 +65,8 @@ services:
       dockerfile: gateway/Dockerfile
       args:
         TRAMA_BINARY: trama-outbox
+      secrets:
+        - trama-ca
     environment:
       TRAMA_ENV: local
       TRAMA_DATABASE_URL: postgresql://trama:trama-local-only@postgres:5432/trama?sslmode=disable
@@ -78,6 +82,8 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      secrets:
+        - trama-ca
     environment:
       TRAMA_ENV: local
       TRAMA_API_HOST: 0.0.0.0
@@ -96,6 +102,8 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      secrets:
+        - trama-ca
     command: ["trama", "worker"]
     environment:
       TRAMA_ENV: prod
@@ -117,3 +125,7 @@ volumes:
   postgres-data:
   nats-data:
   redis-data:
+
+secrets:
+  trama-ca:
+    file: ${TRAMA_CA_CERT_FILE}

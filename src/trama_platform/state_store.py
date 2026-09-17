@@ -964,6 +964,8 @@ class PostgresStateStore:
                 created_at TIMESTAMPTZ NOT NULL,
                 organization_id TEXT NOT NULL,
                 project_id TEXT,
+                action TEXT NOT NULL,
+                status TEXT NOT NULL,
                 payload JSONB NOT NULL
             )
             """,
@@ -1309,8 +1311,9 @@ class PostgresStateStore:
             connection.execute(
                 """
                 INSERT INTO trama.operation_events(
-                    event_id, created_at, organization_id, project_id, payload
-                ) VALUES (%s, %s, %s, %s, %s)
+                    event_id, created_at, organization_id, project_id,
+                    action, status, payload
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT(event_id) DO NOTHING
                 """,
                 (
@@ -1318,6 +1321,8 @@ class PostgresStateStore:
                     event.created_at,
                     event.organization_id,
                     event.project_id,
+                    event.action,
+                    event.status,
                     json.dumps(event_payload),
                 ),
             )
@@ -1392,8 +1397,9 @@ class PostgresStateStore:
             connection.execute(
                 """
                 INSERT INTO trama.operation_events(
-                    event_id, created_at, organization_id, project_id, payload
-                ) VALUES (%s, %s, %s, %s, %s)
+                    event_id, created_at, organization_id, project_id,
+                    action, status, payload
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT(event_id) DO NOTHING
                 """,
                 (
@@ -1401,6 +1407,8 @@ class PostgresStateStore:
                     event.created_at,
                     event.organization_id,
                     event.project_id,
+                    event.action,
+                    event.status,
                     json.dumps(event_payload),
                 ),
             )
@@ -1621,8 +1629,9 @@ class PostgresStateStore:
             connection.execute(
                 """
                 INSERT INTO trama.operation_events(
-                    event_id, created_at, organization_id, project_id, payload
-                ) VALUES (%s, %s, %s, %s, %s)
+                    event_id, created_at, organization_id, project_id,
+                    action, status, payload
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT(event_id) DO NOTHING
                 """,
                 (
@@ -1630,6 +1639,8 @@ class PostgresStateStore:
                     event.created_at,
                     event.organization_id,
                     event.project_id,
+                    event.action,
+                    event.status,
                     json.dumps(event.model_dump(mode="json")),
                 ),
             )
