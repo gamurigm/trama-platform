@@ -148,3 +148,44 @@ def test_production_result_write_must_match_the_task_namespace():
     )
 
     assert response.status_code == 403
+
+
+def test_production_reads_resolve_same_ids_inside_the_request_organization():
+    client = TestClient(create_app(TramaRuntime(), settings=_settings()))
+    for organization_id, repository in (("org-a", "repo-a"), ("org-b", "repo-b")):
+        assert client.post(
+            "/v1/projects",
+            headers=_headers(organization_id),
+            json={
+                "project_id": "demo",
+                "organization_id": organization_id,
+                "repository": repository,
+            },
+        ).status_code == 201
+        assert client.post(
+            "/v1/tasks",
+            headers=_headers(organization_id),
+            json={
+                "task_id": "task-1",
+                "organization_id": organization_id,
+                "project_id": "demo",
+                "objective": "Run tests",
+                "actor": "hermes",
+                "repository": repository,
+                "branch": "main",
+                "worktree": f"C:/work/{organization_id}",
+                "acceptance_criteria": ["tests pass"],
+            },
+        ).status_code == 202
+
+    for organization_id, repository in (("org-a", "repo-a"), ("org-b", "repo-b")):
+        project = client.get(
+            "/v1/projects/demo", headers=_headers(organization_id)
+        )
+        task = client.get("/v1/tasks/task-1", headers=_headers(organization_id))
+
+        assert project.status_code == 200
+        assert project.json()["repository"] == repository
+        assert task.status_code == 200
+        assert task.json()["organization_id"] == organization_id
+        assert task.json()["repository"] == repository

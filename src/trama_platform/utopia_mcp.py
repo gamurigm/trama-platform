@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 
 from .contracts import Evidence, MemoryCandidate, PromotionRequest
-from .namespaces import can_promote
+from .namespaces import ScopedStore, can_promote, namespace_key
 from .ports import CanonicalKnowledgePort, ContextMemoryPort
 
 
@@ -40,7 +40,7 @@ class UtopiaMcpAdapter(ContextMemoryPort, CanonicalKnowledgePort):
         )
         self.kb_id = kb_id
         self._request_id = 0
-        self.candidates: dict[str, MemoryCandidate] = {}
+        self.candidates: ScopedStore[MemoryCandidate] = ScopedStore()
 
     def _call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         self._request_id += 1
@@ -80,8 +80,14 @@ class UtopiaMcpAdapter(ContextMemoryPort, CanonicalKnowledgePort):
         )
         return candidate.candidate_id
 
-    def get_candidate(self, candidate_id: str) -> MemoryCandidate | None:
-        return self.candidates.get(candidate_id)
+    def get_candidate(
+        self, candidate_id: str, *, organization_id: str | None = None
+    ) -> MemoryCandidate | None:
+        return self.candidates.get(
+            candidate_id
+            if organization_id is None
+            else namespace_key(organization_id, candidate_id)
+        )
 
     def search(
         self, organization_id: str, project_id: str, query: str, agent_id: str | None = None
@@ -107,7 +113,9 @@ class UtopiaMcpAdapter(ContextMemoryPort, CanonicalKnowledgePort):
                 confidence=1.0,
                 status="validated",
             )
-            self.candidates[candidate.candidate_id] = candidate
+            self.candidates[
+                namespace_key(candidate.organization_id, candidate.candidate_id)
+            ] = candidate
             found.append(candidate)
         return found
 

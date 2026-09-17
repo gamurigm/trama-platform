@@ -1,3 +1,5 @@
+import json
+import sqlite3
 from pathlib import Path
 
 from trama_platform.contracts import (
@@ -57,6 +59,81 @@ def test_sqlite_store_round_trips_control_plane_state(tmp_path: Path):
     assert restored.tasks["task-1"].objective == "Run tests"
     assert restored.coordination.results["task-1"].status == "succeeded"
     assert restored.context_memory.get_candidate("candidate-1").fact == "tests pass"
+
+
+def test_sqlite_store_keeps_same_task_id_for_separate_organizations(tmp_path: Path):
+    store = SqliteStateStore(tmp_path / "trama.db")
+    store.save_task(_task())
+    store.save_task(
+        _task().model_copy(
+            update={"organization_id": "org-b", "repository": "repo-b"}
+        )
+    )
+
+    restored = SqliteStateStore(tmp_path / "trama.db")
+
+    assert {
+        (item.organization_id, item.task_id, item.repository)
+        for item in restored.load_tasks()
+    } == {
+        ("org-a", "task-1", "repo-a"),
+        ("org-b", "task-1", "repo-b"),
+    }
+
+
+def test_sqlite_store_keeps_same_result_id_for_separate_organizations(tmp_path: Path):
+    store = SqliteStateStore(tmp_path / "trama.db")
+    store.save_result(
+        AgentResult(
+            task_id="task-1",
+            organization_id="org-a",
+            status="succeeded",
+            summary="a",
+        )
+    )
+    store.save_result(
+        AgentResult(
+            task_id="task-1",
+            organization_id="org-b",
+            status="succeeded",
+            summary="b",
+        )
+    )
+
+    assert {
+        (item.organization_id, item.summary) for item in store.load_results()
+    } == {("org-a", "a"), ("org-b", "b")}
+
+
+def test_sqlite_store_migrates_legacy_records_to_namespace_keys(tmp_path: Path):
+    database = tmp_path / "legacy.db"
+    legacy_task = _task()
+    connection = sqlite3.connect(database)
+    connection.execute(
+        """
+        CREATE TABLE state_records (
+            kind TEXT NOT NULL,
+            record_id TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            PRIMARY KEY (kind, record_id)
+        )
+        """
+    )
+    connection.execute(
+        "INSERT INTO state_records(kind, record_id, payload) VALUES (?, ?, ?)",
+        ("task", "task-1", json.dumps(legacy_task.model_dump(mode="json"))),
+    )
+    connection.commit()
+    connection.close()
+
+    store = SqliteStateStore(database)
+
+    loaded = store.load_tasks()
+    assert len(loaded) == 1
+    assert loaded[0].model_dump(mode="json") == legacy_task.model_dump(mode="json")
+    with sqlite3.connect(database) as migrated:
+        columns = {row[1] for row in migrated.execute("PRAGMA table_info(state_records)")}
+    assert "organization_id" in columns
 
 
 def test_runtime_records_auditable_events_in_sqlite(tmp_path: Path):

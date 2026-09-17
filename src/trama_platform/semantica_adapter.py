@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from .contracts import MemoryCandidate
-from .namespaces import can_read_candidate
+from .namespaces import ScopedStore, can_read_candidate, namespace_key
 from .ports import ContextMemoryPort
 
 
@@ -21,7 +21,7 @@ class SemanticaContextAdapter(ContextMemoryPort):
     def __init__(self, context: Any, *, max_results: int = 20) -> None:
         self.context = context
         self.max_results = max(1, min(max_results, 100))
-        self.candidates: dict[str, MemoryCandidate] = {}
+        self.candidates: ScopedStore[MemoryCandidate] = ScopedStore()
 
     def put_candidate(self, candidate: MemoryCandidate) -> str:
         metadata = candidate.model_dump(mode="json")
@@ -33,11 +33,19 @@ class SemanticaContextAdapter(ContextMemoryPort):
             extract_entities=False,
             extract_relationships=False,
         )
-        self.candidates[candidate.candidate_id] = candidate
+        self.candidates[
+            namespace_key(candidate.organization_id, candidate.candidate_id)
+        ] = candidate
         return candidate.candidate_id
 
-    def get_candidate(self, candidate_id: str) -> MemoryCandidate | None:
-        return self.candidates.get(candidate_id)
+    def get_candidate(
+        self, candidate_id: str, *, organization_id: str | None = None
+    ) -> MemoryCandidate | None:
+        return self.candidates.get(
+            candidate_id
+            if organization_id is None
+            else namespace_key(organization_id, candidate_id)
+        )
 
     def search(
         self, organization_id: str, project_id: str, query: str, agent_id: str | None = None
@@ -65,7 +73,9 @@ class SemanticaContextAdapter(ContextMemoryPort):
                 )
                 metadata.setdefault("confidence", 1.0)
                 candidate = MemoryCandidate.model_validate(metadata)
-            self.candidates[candidate.candidate_id] = candidate
+            self.candidates[
+                namespace_key(candidate.organization_id, candidate.candidate_id)
+            ] = candidate
             if can_read_candidate(candidate, organization_id, project_id, agent_id):
                 candidates.append(candidate)
         return candidates

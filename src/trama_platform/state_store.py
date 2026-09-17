@@ -67,11 +67,49 @@ class SqliteStateStore:
                 CREATE TABLE IF NOT EXISTS state_records (
                     kind TEXT NOT NULL,
                     record_id TEXT NOT NULL,
+                    organization_id TEXT NOT NULL DEFAULT 'default',
                     payload TEXT NOT NULL,
-                    PRIMARY KEY (kind, record_id)
+                    PRIMARY KEY (kind, organization_id, record_id)
                 )
                 """
             )
+            state_record_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(state_records)")
+            }
+            if "organization_id" not in state_record_columns:
+                connection.execute(
+                    """
+                    CREATE TABLE state_records_namespaced (
+                        kind TEXT NOT NULL,
+                        record_id TEXT NOT NULL,
+                        organization_id TEXT NOT NULL,
+                        payload TEXT NOT NULL,
+                        PRIMARY KEY (kind, organization_id, record_id)
+                    )
+                    """
+                )
+                old_rows = connection.execute(
+                    "SELECT kind, record_id, payload FROM state_records"
+                ).fetchall()
+                for row in old_rows:
+                    try:
+                        payload = json.loads(row["payload"])
+                    except (TypeError, json.JSONDecodeError):
+                        payload = {}
+                    organization_id = str(payload.get("organization_id") or "default")
+                    connection.execute(
+                        """
+                        INSERT INTO state_records_namespaced(
+                            kind, record_id, organization_id, payload
+                        ) VALUES (?, ?, ?, ?)
+                        """,
+                        (row["kind"], row["record_id"], organization_id, row["payload"]),
+                    )
+                connection.execute("DROP TABLE state_records")
+                connection.execute(
+                    "ALTER TABLE state_records_namespaced RENAME TO state_records"
+                )
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS operation_events (
@@ -152,17 +190,22 @@ class SqliteStateStore:
             connection.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version) VALUES (4)"
             )
+            connection.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version) VALUES (5)"
+            )
 
     def _save_model(self, kind: str, record_id: str, model: BaseModel) -> None:
         payload = json.dumps(model.model_dump(mode="json"), ensure_ascii=False)
+        organization_id = str(getattr(model, "organization_id", "default"))
         with self._connection() as connection:
             connection.execute(
                 """
-                INSERT INTO state_records(kind, record_id, payload)
-                VALUES (?, ?, ?)
-                ON CONFLICT(kind, record_id) DO UPDATE SET payload = excluded.payload
+                INSERT INTO state_records(kind, record_id, organization_id, payload)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(kind, organization_id, record_id)
+                DO UPDATE SET payload = excluded.payload
                 """,
-                (kind, record_id, payload),
+                (kind, record_id, organization_id, payload),
             )
 
     def _load_models(self, kind: str, model_type: type[ModelT]) -> list[ModelT]:
@@ -382,11 +425,12 @@ class SqliteStateStore:
         with self._connection() as connection:
             connection.execute(
                 """
-                INSERT INTO state_records(kind, record_id, payload)
-                VALUES (?, ?, ?)
-                ON CONFLICT(kind, record_id) DO UPDATE SET payload = excluded.payload
+                INSERT INTO state_records(kind, record_id, organization_id, payload)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(kind, organization_id, record_id)
+                DO UPDATE SET payload = excluded.payload
                 """,
-                ("task", task.task_id, task_payload),
+                ("task", task.task_id, task.organization_id, task_payload),
             )
             connection.execute(
                 """
@@ -414,9 +458,9 @@ class SqliteStateStore:
             row = connection.execute(
                 """
                 SELECT payload FROM state_records
-                WHERE kind = ? AND record_id = ?
+                WHERE kind = ? AND organization_id = ? AND record_id = ?
                 """,
-                ("task", task.task_id),
+                ("task", task.organization_id, task.task_id),
             ).fetchone()
             current = (
                 None
@@ -451,11 +495,12 @@ class SqliteStateStore:
                 return False
             connection.execute(
                 """
-                INSERT INTO state_records(kind, record_id, payload)
-                VALUES (?, ?, ?)
-                ON CONFLICT(kind, record_id) DO UPDATE SET payload = excluded.payload
+                INSERT INTO state_records(kind, record_id, organization_id, payload)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(kind, organization_id, record_id)
+                DO UPDATE SET payload = excluded.payload
                 """,
-                ("task", task.task_id, task_payload),
+                ("task", task.task_id, task.organization_id, task_payload),
             )
             connection.execute(
                 """
@@ -467,6 +512,10 @@ class SqliteStateStore:
         return True
 
     def save_task_result(self, task: TaskEnvelope, result: AgentResult) -> bool:
+        if result.organization_id == "default" and task.organization_id != "default":
+            result = result.model_copy(update={"organization_id": task.organization_id})
+        elif result.organization_id != task.organization_id:
+            return False
         task_payload = json.dumps(task.model_dump(mode="json"), ensure_ascii=False)
         result_payload = json.dumps(result.model_dump(mode="json"), ensure_ascii=False)
         if task.execution_attempt is None:
@@ -476,9 +525,9 @@ class SqliteStateStore:
                 row = connection.execute(
                     """
                     SELECT payload FROM state_records
-                    WHERE kind = ? AND record_id = ?
+                    WHERE kind = ? AND organization_id = ? AND record_id = ?
                     """,
-                    ("task", task.task_id),
+                    ("task", task.organization_id, task.task_id),
                 ).fetchone()
                 current = (
                     None
@@ -521,21 +570,23 @@ class SqliteStateStore:
                 )
                 connection.execute(
                     """
-                    INSERT INTO state_records(kind, record_id, payload)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT(kind, record_id) DO UPDATE SET payload = excluded.payload
+                    INSERT INTO state_records(kind, record_id, organization_id, payload)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(kind, organization_id, record_id)
+                    DO UPDATE SET payload = excluded.payload
                     """,
-                    ("task", task.task_id, json.dumps(
+                    ("task", task.task_id, task.organization_id, json.dumps(
                         persisted_task.model_dump(mode="json"), ensure_ascii=False
                     )),
                 )
                 connection.execute(
                     """
-                    INSERT INTO state_records(kind, record_id, payload)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT(kind, record_id) DO UPDATE SET payload = excluded.payload
+                    INSERT INTO state_records(kind, record_id, organization_id, payload)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(kind, organization_id, record_id)
+                    DO UPDATE SET payload = excluded.payload
                     """,
-                    ("result", result.task_id, result_payload),
+                    ("result", result.task_id, result.organization_id, result_payload),
                 )
                 if effective_attempt is not None:
                     updated = connection.execute(
@@ -564,9 +615,9 @@ class SqliteStateStore:
             row = connection.execute(
                 """
                 SELECT payload FROM state_records
-                WHERE kind = ? AND record_id = ?
+                WHERE kind = ? AND organization_id = ? AND record_id = ?
                 """,
-                ("task", task.task_id),
+                ("task", task.organization_id, task.task_id),
             ).fetchone()
             current = (
                 None
@@ -597,19 +648,21 @@ class SqliteStateStore:
                 return False
             connection.execute(
                 """
-                INSERT INTO state_records(kind, record_id, payload)
-                VALUES (?, ?, ?)
-                ON CONFLICT(kind, record_id) DO UPDATE SET payload = excluded.payload
+                INSERT INTO state_records(kind, record_id, organization_id, payload)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(kind, organization_id, record_id)
+                DO UPDATE SET payload = excluded.payload
                 """,
-                ("task", task.task_id, task_payload),
+                ("task", task.task_id, task.organization_id, task_payload),
             )
             connection.execute(
                 """
-                INSERT INTO state_records(kind, record_id, payload)
-                VALUES (?, ?, ?)
-                ON CONFLICT(kind, record_id) DO UPDATE SET payload = excluded.payload
+                INSERT INTO state_records(kind, record_id, organization_id, payload)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(kind, organization_id, record_id)
+                DO UPDATE SET payload = excluded.payload
                 """,
-                ("result", result.task_id, result_payload),
+                ("result", result.task_id, result.organization_id, result_payload),
             )
             updated = connection.execute(
                 """
@@ -1354,6 +1407,10 @@ class PostgresStateStore:
         return True
 
     def save_task_result(self, task: TaskEnvelope, result: AgentResult) -> bool:
+        if result.organization_id == "default" and task.organization_id != "default":
+            result = result.model_copy(update={"organization_id": task.organization_id})
+        elif result.organization_id != task.organization_id:
+            return False
         task_payload = task.model_dump(mode="json")
         result_payload = result.model_dump(mode="json")
         organization_id, project_id = self._namespace(task)
@@ -1434,7 +1491,12 @@ class PostgresStateStore:
                         payload = excluded.payload,
                         updated_at = CURRENT_TIMESTAMP
                     """,
-                    ("result", result.task_id, "default", json.dumps(result_payload)),
+                    (
+                        "result",
+                        result.task_id,
+                        result.organization_id,
+                        json.dumps(result_payload),
+                    ),
                 )
                 if effective_attempt is not None:
                     updated = connection.execute(
@@ -1512,7 +1574,12 @@ class PostgresStateStore:
                     payload = excluded.payload,
                     updated_at = CURRENT_TIMESTAMP
                 """,
-                ("result", result.task_id, "default", json.dumps(result_payload)),
+                (
+                    "result",
+                    result.task_id,
+                    result.organization_id,
+                    json.dumps(result_payload),
+                ),
             )
             updated = connection.execute(
                 """

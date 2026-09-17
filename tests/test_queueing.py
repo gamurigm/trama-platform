@@ -69,7 +69,9 @@ def test_dispatcher_never_runs_more_than_configured_workers():
         queue_capacity=4,
         max_concurrency=2,
         transition=lambda *args: None,
-        current_task=lambda task_id: make_task(task_id),
+        current_task=lambda organization_id, task_id: make_task(task_id).model_copy(
+            update={"organization_id": organization_id}
+        ),
     )
     try:
         for index in range(4):
@@ -84,6 +86,32 @@ def test_dispatcher_never_runs_more_than_configured_workers():
         dispatcher.close()
 
 
+def test_dispatcher_resolves_current_task_inside_its_organization():
+    coordination = RecordingCoordination()
+    seen: list[tuple[str, str]] = []
+
+    def current_task(organization_id: str, task_id: str) -> TaskEnvelope:
+        seen.append((organization_id, task_id))
+        return make_task(task_id).model_copy(update={"organization_id": organization_id})
+
+    dispatcher = TaskDispatcher(
+        coordination,
+        queue_capacity=1,
+        max_concurrency=1,
+        transition=lambda *args: None,
+        current_task=current_task,
+    )
+    try:
+        dispatcher.submit(
+            make_task("task-1").model_copy(update={"organization_id": "org-b"}),
+            persist=lambda: None,
+        )
+        assert dispatcher.wait_for_idle(timeout=2)
+        assert seen == [("org-b", "task-1")]
+    finally:
+        dispatcher.close()
+
+
 def test_dispatcher_releases_reservation_when_persistence_fails():
     coordination = RecordingCoordination()
     dispatcher = TaskDispatcher(
@@ -91,7 +119,9 @@ def test_dispatcher_releases_reservation_when_persistence_fails():
         queue_capacity=1,
         max_concurrency=1,
         transition=lambda *args: None,
-        current_task=lambda task_id: make_task(task_id),
+        current_task=lambda organization_id, task_id: make_task(task_id).model_copy(
+            update={"organization_id": organization_id}
+        ),
     )
     try:
         with pytest.raises(RuntimeError, match="persist failed"):
@@ -124,7 +154,9 @@ def test_recovery_releases_reservation_when_queue_is_full():
         queue_capacity=1,
         max_concurrency=1,
         transition=lambda *args: None,
-        current_task=lambda task_id: make_task(task_id),
+        current_task=lambda organization_id, task_id: make_task(task_id).model_copy(
+            update={"organization_id": organization_id}
+        ),
         queue=queue,
     )
     try:
@@ -150,5 +182,7 @@ def test_dispatcher_rejects_non_positive_limits(kwargs):
             RecordingCoordination(),
             **kwargs,
             transition=lambda *args: None,
-            current_task=lambda task_id: make_task(task_id),
+            current_task=lambda organization_id, task_id: make_task(task_id).model_copy(
+                update={"organization_id": organization_id}
+            ),
         )

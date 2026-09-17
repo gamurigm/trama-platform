@@ -44,6 +44,13 @@ Toda tarea, memoria, artefacto y conocimiento lleva `organization_id` y
 `project_id`. El acceso cruzado está prohibido por defecto. El conocimiento
 compartido requiere una promoción explícita y evidencia verificable.
 
+Los IDs de negocio no son globales: el runtime, la coordinación y los stores
+los indexan por `(organization_id, entity_id)`. Los endpoints que reciben un
+ID obtienen la organización desde `RequestContext` y el gateway la propaga en
+`X-Organization-ID`; en local, omitirla solo es válido si el ID no es ambiguo.
+SQLite migra los registros históricos al mismo índice namespace-aware y
+PostgreSQL conserva la clave compuesta en `trama.state_records`.
+
 ## Integración de un proyecto
 
 Un proyecto se registra con un manifiesto `ProjectManifestV1`. El manifiesto

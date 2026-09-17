@@ -235,7 +235,16 @@ no es un broker compartido entre procesos; configura sus límites con
 `TRAMA_DISPATCH_TIMEOUT_SECONDS`. Los puertos de contexto y conocimiento usan
 implementaciones locales por defecto. Semantica se conecta nativamente como
 `AgentContext` de Python; Utopia se conecta por el endpoint MCP HTTP de una base
-de conocimiento. Ambas integraciones son opcionales.
+ de conocimiento. Ambas integraciones son opcionales.
+
+Los identificadores de proyectos, requisitos, fases, propuestas, tareas,
+resultados y candidatos no son globales: se resuelven por
+`(organization_id, entity_id)`. En producción, la API toma la organización y
+el proyecto del `RequestContext` (`X-Organization-ID` y `X-Project-ID`) y no
+permite usar un ID de otra organización. Si un consumidor local omite la
+organización, solo se acepta la consulta cuando existe una única coincidencia;
+las colisiones devuelven conflicto. El MCP reenvía el mismo contexto mediante
+headers y campos de contrato, sin guardar credenciales.
 
 En el modo distribuido, todos los clientes entran por el gateway Go. `POST
 /v1/tasks` usa una operación transaccional de PostgreSQL (admisión, proyección

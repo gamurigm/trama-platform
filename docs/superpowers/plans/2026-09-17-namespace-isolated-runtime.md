@@ -35,21 +35,21 @@
 - Produce: `NamespaceKey`, `namespace_key()`, `ScopedStore` y `AgentResult.organization_id`.
 - Consumers: runtime, coordinación, stores y API.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Añadir pruebas que registren dos valores con el mismo ID en organizaciones
 distintas, que `ScopedStore.find` los separe y que una búsqueda sin
 organización rechace la ambigüedad. Añadir una prueba de runtime que registre
 dos proyectos y dos tareas iguales pero con distinto namespace.
 
-- [ ] **Step 2: Run the focused tests and verify failure**
+- [x] **Step 2: Run the focused tests and verify failure**
 
 Run: `.venv/Scripts/python.exe -m pytest tests/test_namespaces.py tests/test_runtime.py -q`
 
 Expected: FAIL porque no existe `ScopedStore` y los registros actuales
 sobrescriben la primera entidad.
 
-- [ ] **Step 3: Implement the minimal scoped collection**
+- [x] **Step 3: Implement the minimal scoped collection**
 
 Implementar `ScopedStore` con almacenamiento interno por tupla, `find`,
 `get`, `update`, `values`, `items`, `__getitem__`, `__setitem__`,
@@ -66,13 +66,13 @@ organization_id: str = Field(default="default", min_length=1, max_length=100)
 Convertir las colecciones de runtime y coordinación a `ScopedStore` y usar la
 clave del objeto al insertar o actualizar.
 
-- [ ] **Step 4: Run focused tests and existing runtime tests**
+- [x] **Step 4: Run focused tests and existing runtime tests**
 
 Run: `.venv/Scripts/python.exe -m pytest tests/test_namespaces.py tests/test_runtime.py tests/test_state_store.py -q`
 
 Expected: PASS, incluyendo las llamadas históricas del namespace `default`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/trama_platform/namespaces.py src/trama_platform/contracts.py src/trama_platform/ports.py src/trama_platform/runtime.py tests/test_namespaces.py tests/test_runtime.py tests/test_state_store.py
@@ -96,21 +96,21 @@ git commit -m "feat: aislar registros en memoria por organizacion"
 - Produces: lookups internos con organización explícita y resultados persistidos
   en el namespace del task.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Añadir una prueba de dispatcher donde dos tareas del mismo `task_id` pero de
 organizaciones distintas se recuperen y cada coordinación reciba únicamente
 la tarea de su namespace. Añadir una prueba de resultado donde dos runtimes
 registren el mismo ID en distintas organizaciones sin sobrescribirse.
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run: `.venv/Scripts/python.exe -m pytest tests/test_queueing.py tests/test_state_store.py tests/test_state_store_leases.py -q`
 
 Expected: FAIL porque `TaskLookup` recibe solo `task_id` y el runtime comparte
 el mismo índice para ambas organizaciones.
 
-- [ ] **Step 3: Implement namespace propagation**
+- [x] **Step 3: Implement namespace propagation**
 
 Cambiar `TaskLookup` para recibir `(organization_id, task_id)`, actualizar el
 dispatcher y resolver dependencias con la organización del task. Hacer que
@@ -122,13 +122,13 @@ Actualizar `save_task_result`/`save_result` para persistir el
 intento del lease. Mantener el adaptador CCCC compatible con productores
 anteriores mediante el valor `default`.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run: `.venv/Scripts/python.exe -m pytest tests/test_queueing.py tests/test_state_store.py tests/test_state_store_leases.py tests/test_runtime.py -q`
 
 Expected: PASS sin colisiones entre namespaces.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/trama_platform/queueing.py src/trama_platform/runtime.py src/trama_platform/state_store.py src/trama_platform/adapters.py src/trama_platform/mcp_server.py tests/test_queueing.py tests/test_state_store.py tests/test_state_store_leases.py
@@ -151,19 +151,19 @@ git commit -m "feat: propagar namespace en despacho y resultados"
 - Produces: endpoints tenant-aware que no seleccionan otro registro antes de
   ejecutar `ensure_namespace`.
 
-- [ ] **Step 1: Write failing API tests**
+- [x] **Step 1: Write failing API tests**
 
 Probar dos organizaciones con el mismo `task_id`: cada header
 `X-Organization-ID` obtiene su tarea, y un resultado, cancelación, reintento,
 aprobación o timeline no puede operar sobre el task de otra organización.
 
-- [ ] **Step 2: Run API tests and verify failure**
+- [x] **Step 2: Run API tests and verify failure**
 
 Run: `.venv/Scripts/python.exe -m pytest tests/test_api.py tests/test_mcp_server.py -q`
 
 Expected: FAIL porque los endpoints resuelven sus IDs sin pasar el contexto.
 
-- [ ] **Step 3: Implement context propagation**
+- [x] **Step 3: Implement context propagation**
 
 Extraer la organización de `RequestContext`, pasarla a los métodos de lookup
 y convertir la ambigüedad en HTTP 409 o 404 según corresponda. Al registrar
@@ -173,7 +173,7 @@ esté autorizado. Mantener las URLs y las respuestas exitosas existentes.
 Documentar el contrato en README y arquitectura: IDs no son globales, el
 namespace es obligatorio en producción y los lookups ambiguos se rechazan.
 
-- [ ] **Step 4: Run the complete verification**
+- [x] **Step 4: Run the complete verification**
 
 Run:
 
@@ -187,7 +187,7 @@ git diff origin/main...HEAD --name-only | Select-String -Pattern '(^|/)(settings
 Expected: all tests and Ruff pass; no whitespace errors or forbidden local
 configuration files appear.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/trama_platform/api.py src/trama_platform/mcp_server.py src/trama_platform/runtime.py README.md docs/ARQUITECTURA.md tests/test_api.py tests/test_mcp_server.py

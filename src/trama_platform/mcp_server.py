@@ -38,18 +38,24 @@ class TramaApiClient:
         task_token: str | None = None,
         gateway_url: str | None = None,
         gateway_token: str | None = None,
+        organization_id: str | None = None,
         http_client: httpx.Client | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.task_base_url = task_base_url.rstrip("/") if task_base_url else None
         self.gateway_url = gateway_url.rstrip("/") if gateway_url else None
         self.gateway_token = gateway_token or task_token
+        self.organization_id = organization_id
         self.http_client = http_client or httpx.Client()
 
-    def _auth_headers(self) -> dict[str, str]:
+    def _auth_headers(self, organization_id: str | None = None) -> dict[str, str]:
+        effective_organization = organization_id or self.organization_id
+        headers: dict[str, str] = {}
         if self.gateway_token:
-            return {"Authorization": f"Bearer {self.gateway_token}"}
-        return {}
+            headers["Authorization"] = f"Bearer {self.gateway_token}"
+        if effective_organization:
+            headers["X-Organization-ID"] = effective_organization
+        return headers
 
     def _post(
         self,
@@ -58,9 +64,16 @@ class TramaApiClient:
         *,
         headers: Mapping[str, str] | None = None,
         base_url: str | None = None,
+        organization_id: str | None = None,
     ) -> Any:
         target = base_url or self.gateway_url or self.base_url
-        request_headers = {**self._auth_headers(), **(headers or {})}
+        inferred_organization = organization_id or payload.get("organization_id")
+        request_headers = {
+            **self._auth_headers(
+                str(inferred_organization) if inferred_organization else None
+            ),
+            **(headers or {}),
+        }
         response = self.http_client.post(
             f"{target}{path}", json=dict(payload), headers=request_headers
         )
@@ -72,9 +85,11 @@ class TramaApiClient:
             raise TramaApiError(f"TRAMA API {response.status_code}: {detail}")
         return response.json()
 
-    def _get(self, path: str) -> Any:
+    def _get(self, path: str, *, organization_id: str | None = None) -> Any:
         target = self.gateway_url or self.base_url
-        response = self.http_client.get(f"{target}{path}", headers=self._auth_headers())
+        response = self.http_client.get(
+            f"{target}{path}", headers=self._auth_headers(organization_id)
+        )
         if response.is_error:
             try:
                 detail = response.json().get("detail", response.text)
@@ -89,12 +104,18 @@ class TramaApiClient:
     def list_projects(self) -> Any:
         return self._get("/v1/projects")
 
-    def get_project(self, project_id: str) -> Any:
-        return self._get(f"/v1/projects/{project_id}")
+    def get_project(self, project_id: str, organization_id: str | None = None) -> Any:
+        return self._get(
+            f"/v1/projects/{project_id}", organization_id=organization_id
+        )
 
-    def list_requirements(self, project_id: str | None = None) -> Any:
+    def list_requirements(
+        self, project_id: str | None = None, organization_id: str | None = None
+    ) -> Any:
         suffix = "" if project_id is None else f"?project_id={project_id}"
-        return self._get(f"/v1/requirements{suffix}")
+        return self._get(
+            f"/v1/requirements{suffix}", organization_id=organization_id
+        )
 
     def register_requirement(self, requirement: Requirement | Mapping[str, Any]) -> Any:
         payload = (
@@ -104,46 +125,60 @@ class TramaApiClient:
         )
         return self._post("/v1/requirements", payload)
 
-    def list_phases(self, project_id: str | None = None) -> Any:
+    def list_phases(
+        self, project_id: str | None = None, organization_id: str | None = None
+    ) -> Any:
         suffix = "" if project_id is None else f"?project_id={project_id}"
-        return self._get(f"/v1/phases{suffix}")
+        return self._get(f"/v1/phases{suffix}", organization_id=organization_id)
 
     def register_phase(self, phase: ProjectPhase | Mapping[str, Any]) -> Any:
         payload = phase.model_dump(mode="json") if isinstance(phase, ProjectPhase) else phase
         return self._post("/v1/phases", payload)
 
-    def get_overview(self, project_id: str | None = None) -> Any:
+    def get_overview(
+        self, project_id: str | None = None, organization_id: str | None = None
+    ) -> Any:
         suffix = "" if project_id is None else f"?project_id={project_id}"
-        return self._get(f"/v1/overview{suffix}")
+        return self._get(f"/v1/overview{suffix}", organization_id=organization_id)
 
-    def list_tasks(self) -> Any:
-        return self._get("/v1/tasks")
+    def list_tasks(self, organization_id: str | None = None) -> Any:
+        return self._get("/v1/tasks", organization_id=organization_id)
 
-    def get_task(self, task_id: str) -> Any:
-        return self._get(f"/v1/tasks/{task_id}")
+    def get_task(self, task_id: str, organization_id: str | None = None) -> Any:
+        return self._get(f"/v1/tasks/{task_id}", organization_id=organization_id)
 
-    def get_task_result(self, task_id: str) -> Any:
-        return self._get(f"/v1/tasks/{task_id}/result")
+    def get_task_result(self, task_id: str, organization_id: str | None = None) -> Any:
+        return self._get(
+            f"/v1/tasks/{task_id}/result", organization_id=organization_id
+        )
 
-    def cancel_task(self, task_id: str) -> Any:
-        return self._post(f"/v1/tasks/{task_id}/cancel", {})
+    def cancel_task(self, task_id: str, organization_id: str | None = None) -> Any:
+        return self._post(
+            f"/v1/tasks/{task_id}/cancel", {}, organization_id=organization_id
+        )
 
-    def retry_task(self, task_id: str) -> Any:
-        return self._post(f"/v1/tasks/{task_id}/retry", {})
+    def retry_task(self, task_id: str, organization_id: str | None = None) -> Any:
+        return self._post(
+            f"/v1/tasks/{task_id}/retry", {}, organization_id=organization_id
+        )
 
     def list_agents(self) -> Any:
         return self._get("/v1/agents")
 
     def list_memory_candidates(self, organization_id: str, project_id: str) -> Any:
         return self._get(
-            f"/v1/memory/candidates?organization_id={organization_id}&project_id={project_id}"
+            f"/v1/memory/candidates?organization_id={organization_id}&project_id={project_id}",
+            organization_id=organization_id,
         )
 
     def get_memory_candidate(
         self, candidate_id: str, organization_id: str, project_id: str
     ) -> Any:
         query = urlencode({"organization_id": organization_id, "project_id": project_id})
-        return self._get(f"/v1/memory/candidates/{candidate_id}?{query}")
+        return self._get(
+            f"/v1/memory/candidates/{candidate_id}?{query}",
+            organization_id=organization_id,
+        )
 
     def validate_memory_candidate(
         self, candidate_id: str, *, organization_id: str, project_id: str, reviewer: str
@@ -152,6 +187,7 @@ class TramaApiClient:
         return self._post(
             f"/v1/memory/candidates/{candidate_id}/validate?{query}",
             {"reviewer": reviewer},
+            organization_id=organization_id,
         )
 
     def reject_memory_candidate(
@@ -161,16 +197,29 @@ class TramaApiClient:
         return self._post(
             f"/v1/memory/candidates/{candidate_id}/reject?{query}",
             {"reviewer": reviewer},
+            organization_id=organization_id,
         )
 
-    def list_events(self, limit: int = 100) -> Any:
-        return self._get(f"/v1/events?limit={limit}")
+    def list_events(self, limit: int = 100, organization_id: str | None = None) -> Any:
+        return self._get(
+            f"/v1/events?limit={limit}", organization_id=organization_id
+        )
 
-    def get_task_timeline(self, task_id: str, limit: int = 100) -> Any:
-        return self._get(f"/v1/tasks/{task_id}/timeline?limit={limit}")
+    def get_task_timeline(
+        self, task_id: str, limit: int = 100, organization_id: str | None = None
+    ) -> Any:
+        return self._get(
+            f"/v1/tasks/{task_id}/timeline?limit={limit}",
+            organization_id=organization_id,
+        )
 
-    def get_phase_timeline(self, phase_id: str, limit: int = 100) -> Any:
-        return self._get(f"/v1/phases/{phase_id}/timeline?limit={limit}")
+    def get_phase_timeline(
+        self, phase_id: str, limit: int = 100, organization_id: str | None = None
+    ) -> Any:
+        return self._get(
+            f"/v1/phases/{phase_id}/timeline?limit={limit}",
+            organization_id=organization_id,
+        )
 
     def list_logs(
         self,
@@ -192,7 +241,9 @@ class TramaApiClient:
             ("level", level),
         ) if value is not None]
         params.append(f"limit={limit}")
-        return self._get(f"/v1/logs?{'&'.join(params)}")
+        return self._get(
+            f"/v1/logs?{'&'.join(params)}", organization_id=organization_id
+        )
 
     def register_plan_proposal(
         self, proposal: PlanProposal | Mapping[str, Any]
@@ -204,11 +255,19 @@ class TramaApiClient:
         )
         return self._post("/v1/plans", payload)
 
-    def get_plan(self, proposal_id: str) -> Any:
-        return self._get(f"/v1/plans/{proposal_id}")
+    def get_plan(self, proposal_id: str, organization_id: str | None = None) -> Any:
+        return self._get(
+            f"/v1/plans/{proposal_id}", organization_id=organization_id
+        )
 
-    def approve_plan(self, proposal_id: str, approver: str) -> Any:
-        return self._post(f"/v1/plans/{proposal_id}/approve", {"approver": approver})
+    def approve_plan(
+        self, proposal_id: str, approver: str, organization_id: str | None = None
+    ) -> Any:
+        return self._post(
+            f"/v1/plans/{proposal_id}/approve",
+            {"approver": approver},
+            organization_id=organization_id,
+        )
 
     def record_task_log(self, log: TaskLog | Mapping[str, Any]) -> Any:
         payload = log.model_dump(mode="json") if isinstance(log, TaskLog) else log
@@ -368,22 +427,28 @@ def create_mcp_server(client: TramaApiClient) -> MCPServer:
         )
 
     @server.tool()
-    def trama_approve_plan(proposal_id: str, approver: str) -> dict[str, Any]:
+    def trama_approve_plan(
+        proposal_id: str, approver: str, organization_id: str | None = None
+    ) -> dict[str, Any]:
         """Aprueba explícitamente un plan; nunca se aprueba de forma implícita."""
 
-        return client.approve_plan(proposal_id, approver)
+        return client.approve_plan(proposal_id, approver, organization_id)
 
     @server.tool()
-    def trama_get_task_timeline(task_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    def trama_get_task_timeline(
+        task_id: str, limit: int = 100, organization_id: str | None = None
+    ) -> list[dict[str, Any]]:
         """Consulta eventos y logs de una tarea para observabilidad."""
 
-        return client.get_task_timeline(task_id, limit)
+        return client.get_task_timeline(task_id, limit, organization_id)
 
     @server.tool()
-    def trama_get_phase_timeline(phase_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    def trama_get_phase_timeline(
+        phase_id: str, limit: int = 100, organization_id: str | None = None
+    ) -> list[dict[str, Any]]:
         """Consulta el timeline agregado de una fase."""
 
-        return client.get_phase_timeline(phase_id, limit)
+        return client.get_phase_timeline(phase_id, limit, organization_id)
 
     @server.tool()
     def trama_list_logs(
@@ -507,6 +572,7 @@ def create_mcp_server(client: TramaApiClient) -> MCPServer:
         task_id: str,
         status: Literal["succeeded", "partial", "failed", "blocked"],
         summary: str,
+        organization_id: str = "default",
         files_changed: list[str] | None = None,
         commands: list[str] | None = None,
         warnings: list[str] | None = None,
@@ -516,6 +582,7 @@ def create_mcp_server(client: TramaApiClient) -> MCPServer:
 
         result = AgentResult(
             task_id=task_id,
+            organization_id=organization_id,
             status=status,
             summary=summary,
             files_changed=files_changed or [],
@@ -526,16 +593,20 @@ def create_mcp_server(client: TramaApiClient) -> MCPServer:
         return client.record_result(result)
 
     @server.tool()
-    def trama_get_task_result(task_id: str) -> dict[str, Any]:
+    def trama_get_task_result(
+        task_id: str, organization_id: str | None = None
+    ) -> dict[str, Any]:
         """Consulta el resultado verificable registrado para una tarea."""
 
-        return client.get_task_result(task_id)
+        return client.get_task_result(task_id, organization_id)
 
     @server.tool()
-    def trama_get_overview(project_id: str | None = None) -> dict[str, Any]:
+    def trama_get_overview(
+        project_id: str | None = None, organization_id: str | None = None
+    ) -> dict[str, Any]:
         """Consulta fases, cola CCCC, agentes y progreso para orientar a Hermes."""
 
-        return client.get_overview(project_id)
+        return client.get_overview(project_id, organization_id)
 
     @server.tool()
     def trama_capture_memory(
@@ -606,6 +677,7 @@ def run_mcp(
     *,
     gateway_url: str | None = None,
     gateway_token: str | None = None,
+    organization_id: str | None = None,
 ) -> None:
     """Inicia el servidor MCP local sobre stdin/stdout."""
 
@@ -614,5 +686,6 @@ def run_mcp(
             api_url,
             gateway_url=gateway_url,
             gateway_token=gateway_token,
+            organization_id=organization_id,
         )
     ).run(transport="stdio")

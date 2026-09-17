@@ -466,6 +466,8 @@ def main() -> None:
                 client_options["gateway_url"] = args.gateway_url
             if settings.gateway_token:
                 client_options["gateway_token"] = settings.gateway_token
+            if settings.organization_id != "default":
+                client_options["organization_id"] = settings.organization_id
             status = TramaApiClient(args.api_url, **client_options).get_status()
             _emit(
                 {
@@ -481,9 +483,10 @@ def main() -> None:
                     args.api_url,
                     gateway_url=args.gateway_url,
                     gateway_token=settings.gateway_token,
+                    organization_id=settings.organization_id,
                 )
             else:
-                run_mcp(args.api_url)
+                run_mcp(args.api_url, organization_id=settings.organization_id)
     elif args.command in {
         "up",
         "down",

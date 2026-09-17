@@ -30,3 +30,16 @@ def test_scoped_store_rejects_ambiguous_lookup_without_organization():
 
     with pytest.raises(ValueError, match="ambigua"):
         store.find("demo")
+
+
+def test_scoped_store_updates_from_another_scoped_store():
+    source = ScopedStore[ProjectManifest]()
+    project = ProjectManifest(
+        project_id="demo", organization_id="org-a", repository="repo-a"
+    )
+    source[namespace_key(project.organization_id, project.project_id)] = project
+
+    target = ScopedStore[ProjectManifest]()
+    target.update(source)
+
+    assert target.find("demo", organization_id="org-a") == project

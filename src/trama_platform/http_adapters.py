@@ -57,9 +57,19 @@ class SemanticaHttpAdapter(_HttpAdapter, ContextMemoryPort):
         )
         return str(payload.get("candidate_id", candidate.candidate_id))
 
-    def get_candidate(self, candidate_id: str) -> MemoryCandidate | None:
+    def get_candidate(
+        self, candidate_id: str, *, organization_id: str | None = None
+    ) -> MemoryCandidate | None:
         try:
-            payload = self._request("GET", f"/v1/memory/candidates/{candidate_id}")
+            payload = self._request(
+                "GET",
+                f"/v1/memory/candidates/{candidate_id}",
+                params=(
+                    {"organization_id": organization_id}
+                    if organization_id is not None
+                    else None
+                ),
+            )
         except ExternalServiceError as exc:
             if "404" in str(exc):
                 return None

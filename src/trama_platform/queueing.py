@@ -65,7 +65,7 @@ class BoundedTaskQueue(TaskQueuePort):
 
 
 TaskTransition = Callable[[TaskEnvelope, str, str, dict[str, object]], bool | None]
-TaskLookup = Callable[[str], TaskEnvelope | None]
+TaskLookup = Callable[[str, str], TaskEnvelope | None]
 
 
 class TaskDispatcher:
@@ -155,7 +155,7 @@ class TaskDispatcher:
                 self._active_dispatches += 1
             lease: TaskLease | None = None
             try:
-                current = self._current_task(task.task_id)
+                current = self._current_task(task.organization_id, task.task_id)
                 if current is None or current.state not in {"accepted", "running"}:
                     continue
                 if self.lease_manager is not None:

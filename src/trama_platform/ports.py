@@ -126,7 +126,9 @@ class TaskQueuePort(Protocol):
 class ContextMemoryPort(Protocol):
     def put_candidate(self, candidate: MemoryCandidate) -> str: ...
 
-    def get_candidate(self, candidate_id: str) -> MemoryCandidate | None: ...
+    def get_candidate(
+        self, candidate_id: str, *, organization_id: str | None = None
+    ) -> MemoryCandidate | None: ...
 
     def search(
         self, organization_id: str, project_id: str, query: str, agent_id: str | None = None

@@ -78,7 +78,12 @@ class ScopedStore(Generic[ValueT]):
         values: Mapping[NamespaceKey | str, ValueT]
         | Iterable[tuple[NamespaceKey | str, ValueT]],
     ) -> None:
-        items = values.items() if isinstance(values, Mapping) else values
+        if isinstance(values, ScopedStore):
+            items = values.items()
+        elif isinstance(values, Mapping):
+            items = values.items()
+        else:
+            items = values
         for key, value in items:
             self[key] = value
 

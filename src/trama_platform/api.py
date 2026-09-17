@@ -70,6 +70,12 @@ def create_app(
     def request_context(request: Request) -> RequestContext:
         return request.state.trama_context
 
+    def request_organization(request: Request) -> str | None:
+        """Devuelve el namespace explícito o conserva el fallback local único."""
+        if tenant_context_required or request.headers.get("x-organization-id"):
+            return request_context(request).organization_id
+        return None
+
     def ensure_namespace(request: Request, value: object) -> object:
         if not tenant_context_required:
             return value
@@ -234,16 +240,23 @@ def create_app(
 
     @app.get("/v1/projects", response_model=list[ProjectManifest])
     def list_projects(request: Request) -> list[ProjectManifest]:
-        return visible_items(request, app.state.runtime.list_projects())
+        return visible_items(
+            request,
+            app.state.runtime.list_projects(request_organization(request)),
+        )
 
     @app.get("/v1/projects/{project_id}", response_model=ProjectManifest)
     def get_project(request: Request, project_id: str) -> ProjectManifest:
         ensure_path_namespace(request, project_id)
         try:
-            project = app.state.runtime.get_project(project_id)
+            project = app.state.runtime.get_project(
+                project_id, organization_id=request_organization(request)
+            )
             return ensure_namespace(request, project)  # type: ignore[return-value]
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.post("/v1/projects", response_model=ProjectManifest, status_code=201)
     def register_project(request: Request, manifest: ProjectManifest) -> ProjectManifest:
@@ -258,7 +271,12 @@ def create_app(
         request: Request, project_id: str | None = Query(default=None)
     ) -> list[Requirement]:
         ensure_path_namespace(request, project_id)
-        return visible_items(request, app.state.runtime.list_requirements(project_id))
+        return visible_items(
+            request,
+            app.state.runtime.list_requirements(
+                project_id, request_organization(request)
+            ),
+        )
 
     @app.post("/v1/requirements", response_model=Requirement, status_code=201)
     def register_requirement(request: Request, requirement: Requirement) -> Requirement:
@@ -275,7 +293,10 @@ def create_app(
         request: Request, project_id: str | None = Query(default=None)
     ) -> list[ProjectPhase]:
         ensure_path_namespace(request, project_id)
-        return visible_items(request, app.state.runtime.list_phases(project_id))
+        return visible_items(
+            request,
+            app.state.runtime.list_phases(project_id, request_organization(request)),
+        )
 
     @app.post("/v1/phases", response_model=ProjectPhase, status_code=201)
     def register_phase(request: Request, phase: ProjectPhase) -> ProjectPhase:
@@ -289,11 +310,20 @@ def create_app(
 
     @app.post("/v1/phases/{phase_id}/approve", response_model=ProjectPhase)
     def approve_phase(request: Request, phase_id: str, payload: dict[str, str]) -> ProjectPhase:
-        phase = getattr(app.state.runtime, "phases", {}).get(phase_id)
+        try:
+            phase = app.state.runtime.phases.find(
+                phase_id, organization_id=request_organization(request)
+            )
+        except (KeyError, ValueError):
+            phase = None
         if phase is not None:
             ensure_namespace(request, phase)
         try:
-            return app.state.runtime.approve_phase(phase_id, approver=payload.get("approver", ""))
+            return app.state.runtime.approve_phase(
+                phase_id,
+                approver=payload.get("approver", ""),
+                organization_id=request_organization(request),
+            )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
@@ -301,32 +331,51 @@ def create_app(
 
     @app.get("/v1/tasks", response_model=list[TaskEnvelope])
     def list_tasks(request: Request) -> list[TaskEnvelope]:
-        return visible_items(request, app.state.runtime.list_tasks())
+        return visible_items(
+            request, app.state.runtime.list_tasks(request_organization(request))
+        )
 
     @app.get("/v1/tasks/{task_id}", response_model=TaskEnvelope)
     def get_task(request: Request, task_id: str) -> TaskEnvelope:
         try:
-            task = app.state.runtime.get_task(task_id)
+            task = app.state.runtime.get_task(
+                task_id, organization_id=request_organization(request)
+            )
             return ensure_namespace(request, task)  # type: ignore[return-value]
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/v1/tasks/{task_id}/result", response_model=AgentResult)
-    def get_task_result(task_id: str) -> AgentResult:
+    def get_task_result(request: Request, task_id: str) -> AgentResult:
         try:
-            return app.state.runtime.get_result(task_id)
+            result = app.state.runtime.get_result(
+                task_id, organization_id=request_organization(request)
+            )
+            return ensure_namespace(request, result)  # type: ignore[return-value]
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.post("/v1/tasks/{task_id}/cancel", response_model=TaskEnvelope)
     def cancel_task(request: Request, task_id: str) -> TaskEnvelope:
         if tenant_context_required and hasattr(app.state.runtime, "get_task"):
             try:
-                ensure_namespace(request, app.state.runtime.get_task(task_id))
+                ensure_namespace(
+                    request,
+                    app.state.runtime.get_task(
+                        task_id, organization_id=request_organization(request)
+                    ),
+                )
             except KeyError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
         try:
-            return app.state.runtime.cancel_task(task_id)
+            organization_id = request_organization(request)
+            if organization_id is None:
+                return app.state.runtime.cancel_task(task_id)
+            return app.state.runtime.cancel_task(task_id, organization_id=organization_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
@@ -336,11 +385,19 @@ def create_app(
     def retry_task(request: Request, task_id: str) -> TaskEnvelope:
         if tenant_context_required and hasattr(app.state.runtime, "get_task"):
             try:
-                ensure_namespace(request, app.state.runtime.get_task(task_id))
+                ensure_namespace(
+                    request,
+                    app.state.runtime.get_task(
+                        task_id, organization_id=request_organization(request)
+                    ),
+                )
             except KeyError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
         try:
-            return app.state.runtime.retry_task(task_id)
+            organization_id = request_organization(request)
+            if organization_id is None:
+                return app.state.runtime.retry_task(task_id)
+            return app.state.runtime.retry_task(task_id, organization_id=organization_id)
         except QueueCapacityError as exc:
             raise HTTPException(
                 status_code=429,
@@ -356,11 +413,20 @@ def create_app(
     def approve_task(request: Request, task_id: str, payload: dict[str, str]) -> TaskEnvelope:
         if tenant_context_required and hasattr(app.state.runtime, "get_task"):
             try:
-                ensure_namespace(request, app.state.runtime.get_task(task_id))
+                ensure_namespace(
+                    request,
+                    app.state.runtime.get_task(
+                        task_id, organization_id=request_organization(request)
+                    ),
+                )
             except KeyError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
         try:
-            return app.state.runtime.approve_task(task_id, approver=payload.get("approver", ""))
+            return app.state.runtime.approve_task(
+                task_id,
+                approver=payload.get("approver", ""),
+                organization_id=request_organization(request),
+            )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except QueueCapacityError as exc:
@@ -374,17 +440,21 @@ def create_app(
     @app.get("/v1/agents")
     def list_agents(request: Request) -> list[dict[str, object]]:
         if not tenant_context_required:
-            return app.state.runtime.list_agents()
+            return app.state.runtime.list_agents(
+                organization_id=request_organization(request)
+            )
+        scoped_tasks = app.state.runtime.list_tasks(request_context(request).organization_id)
         visible_task_ids = {
-            task.task_id
-            for task in visible_items(request, app.state.runtime.list_tasks())
+            task.task_id for task in visible_items(request, scoped_tasks)
         }
         return [
             agent
-            for agent in app.state.runtime.list_agents()
+            for agent in app.state.runtime.list_agents(
+                organization_id=request_context(request).organization_id
+            )
             if any(
                 task.task_id in visible_task_ids
-                for task in app.state.runtime.list_tasks()
+                for task in scoped_tasks
                 if task.actor == agent.get("agent_id")
             )
         ]
@@ -396,7 +466,12 @@ def create_app(
         ensure_path_namespace(request, project_id)
         if tenant_context_required and project_id is None:
             project_id = request_context(request).project_id
-        return visible_overview(request, app.state.runtime.overview(project_id))
+        return visible_overview(
+            request,
+            app.state.runtime.overview(
+                project_id, organization_id=request_organization(request)
+            ),
+        )
 
     @app.post("/v1/tasks", status_code=202)
     def submit_task(request: Request, task: TaskEnvelope) -> dict[str, str]:
@@ -417,12 +492,17 @@ def create_app(
 
     @app.post("/v1/results", status_code=202)
     def record_result(request: Request, result: AgentResult) -> dict[str, str]:
-        if tenant_context_required:
-            try:
-                ensure_namespace(request, app.state.runtime.get_task(result.task_id))
-            except KeyError as exc:
-                raise HTTPException(status_code=404, detail=str(exc)) from exc
         try:
+            if tenant_context_required and result.organization_id == "default":
+                ensure_namespace(request, app.state.runtime.get_task(result.task_id))
+            result = ensure_namespace(request, result)  # type: ignore[assignment]
+            if tenant_context_required:
+                ensure_namespace(
+                    request,
+                    app.state.runtime.get_task(
+                        result.task_id, organization_id=result.organization_id
+                    ),
+                )
             app.state.runtime.record_result(result)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -543,7 +623,13 @@ def create_app(
     def list_events(
         request: Request, limit: int = Query(default=100, ge=1, le=1000)
     ) -> list[OperationEvent]:
-        events = app.state.runtime.list_events(limit)
+        events = app.state.runtime.list_events(
+            limit,
+            organization_id=request_organization(request),
+            project_id=(
+                request_context(request).project_id if tenant_context_required else None
+            ),
+        )
         if tenant_context_required:
             context = request_context(request)
             events = [
@@ -562,20 +648,38 @@ def create_app(
         request: Request, task_id: str, limit: int = Query(default=100, ge=1, le=1000)
     ) -> list[TimelineEntry]:
         try:
-            ensure_namespace(request, app.state.runtime.get_task(task_id))
-            return app.state.runtime.task_timeline(task_id, limit)
+            ensure_namespace(
+                request,
+                app.state.runtime.get_task(
+                    task_id, organization_id=request_organization(request)
+                ),
+            )
+            return app.state.runtime.task_timeline(
+                task_id,
+                limit,
+                organization_id=request_organization(request),
+            )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/v1/phases/{phase_id}/timeline", response_model=list[TimelineEntry])
     def phase_timeline(
         request: Request, phase_id: str, limit: int = Query(default=100, ge=1, le=1000)
     ) -> list[TimelineEntry]:
         try:
-            phase = app.state.runtime.phases.get(phase_id)
-            if phase is not None:
-                ensure_namespace(request, phase)
-            return app.state.runtime.phase_timeline(phase_id, limit)
+            phase = app.state.runtime.phases.find(
+                phase_id, organization_id=request_organization(request)
+            )
+            ensure_namespace(request, phase)
+            return app.state.runtime.phase_timeline(
+                phase_id,
+                limit,
+                organization_id=request_organization(request),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -597,6 +701,11 @@ def create_app(
             organization_id = context.organization_id
             ensure_path_namespace(request, project_id)
             project_id = project_id or context.project_id
+        elif request.headers.get("x-organization-id"):
+            context = request_context(request)
+            if organization_id not in {None, context.organization_id}:
+                raise HTTPException(status_code=403, detail="Organizacion no autorizada")
+            organization_id = context.organization_id
         return app.state.runtime.list_logs(
             organization_id=organization_id,
             project_id=project_id,
@@ -620,10 +729,14 @@ def create_app(
     @app.get("/v1/plans/{proposal_id}", response_model=PlanProposal)
     def get_plan(request: Request, proposal_id: str) -> PlanProposal:
         try:
-            proposal = app.state.runtime.get_plan_proposal(proposal_id)
+            proposal = app.state.runtime.get_plan_proposal(
+                proposal_id, organization_id=request_organization(request)
+            )
             return ensure_namespace(request, proposal)  # type: ignore[return-value]
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.post("/v1/plans", response_model=PlanProposal, status_code=201)
     def register_plan(request: Request, proposal: PlanProposal) -> PlanProposal:
@@ -638,13 +751,19 @@ def create_app(
     @app.post("/v1/plans/{proposal_id}/approve", response_model=PlanProposal)
     def approve_plan(request: Request, proposal_id: str, payload: dict[str, str]) -> PlanProposal:
         try:
-            proposal = app.state.runtime.get_plan_proposal(proposal_id)
+            proposal = app.state.runtime.get_plan_proposal(
+                proposal_id, organization_id=request_organization(request)
+            )
             ensure_namespace(request, proposal)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         try:
             return app.state.runtime.approve_plan(
-                proposal_id, approver=payload.get("approver", "")
+                proposal_id,
+                approver=payload.get("approver", ""),
+                organization_id=request_organization(request),
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

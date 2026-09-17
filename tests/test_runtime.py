@@ -112,7 +112,9 @@ def test_runtime_exposes_a_recorded_task_result():
 
     runtime.record_result(result)
 
-    assert runtime.get_result("task-result") == result
+    assert runtime.get_result("task-result") == result.model_copy(
+        update={"organization_id": "org-a"}
+    )
 
 
 def test_runtime_isolates_same_project_and_task_ids_by_organization():

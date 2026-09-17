@@ -111,6 +111,25 @@ def test_api_client_reads_results_and_reviews_memory_in_a_namespace():
     assert seen[1].url.params["project_id"] == "demo"
 
 
+def test_api_client_sends_explicit_organization_context_for_reads():
+    module = importlib.import_module("trama_platform.mcp_server")
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"task_id": "task-1"})
+
+    client = module.TramaApiClient(
+        "http://trama.test",
+        organization_id="org-a",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    client.get_task("task-1")
+
+    assert seen[0].headers["x-organization-id"] == "org-a"
+
+
 def test_api_client_routes_all_control_plane_calls_through_the_gateway_when_configured():
     module = importlib.import_module("trama_platform.mcp_server")
     seen: list[httpx.Request] = []
@@ -151,8 +170,13 @@ def test_mcp_server_exposes_only_the_scoped_trama_tools():
 
 def test_cli_starts_mcp_with_the_configured_api_url(monkeypatch):
     cli = importlib.import_module("trama_platform.cli")
-    started: list[str] = []
-    monkeypatch.setattr(cli, "run_mcp", lambda api_url: started.append(api_url), raising=False)
+    started: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        cli,
+        "run_mcp",
+        lambda api_url, **kwargs: started.append((api_url, kwargs)),
+        raising=False,
+    )
     monkeypatch.setattr(
         sys,
         "argv",
@@ -161,7 +185,9 @@ def test_cli_starts_mcp_with_the_configured_api_url(monkeypatch):
 
     cli.main()
 
-    assert started == ["http://127.0.0.1:8181"]
+    assert started == [
+        ("http://127.0.0.1:8181", {"organization_id": "default"})
+    ]
 
 
 def test_cli_can_route_task_admission_from_mcp_to_the_go_gateway(monkeypatch):
@@ -192,6 +218,10 @@ def test_cli_can_route_task_admission_from_mcp_to_the_go_gateway(monkeypatch):
     assert started == [
         (
             ("http://127.0.0.1:8090",),
-            {"gateway_url": "http://127.0.0.1:8080", "gateway_token": "gateway-secret"},
+            {
+                "gateway_url": "http://127.0.0.1:8080",
+                "gateway_token": "gateway-secret",
+                "organization_id": "default",
+            },
         )
     ]

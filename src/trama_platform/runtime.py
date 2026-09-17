@@ -45,7 +45,13 @@ class InMemoryCoordination(CoordinationPort):
                 task = self.tasks.find(result.task_id)
             except (KeyError, ValueError) as exc:
                 raise KeyError(f"La tarea {result.task_id} no esta registrada") from exc
+            if result.organization_id == "default" and task.organization_id != "default":
+                result = result.model_copy(update={"organization_id": task.organization_id})
+            elif result.organization_id != task.organization_id:
+                raise ValueError("El resultado no coincide con el namespace de la tarea")
             key = namespace_key(task.organization_id, result.task_id)
+        elif result.organization_id != self.tasks[key].organization_id:
+            raise ValueError("El resultado no coincide con el namespace de la tarea")
         self.results[key] = result
 
 
@@ -59,8 +65,14 @@ class InMemoryContextMemory(ContextMemoryPort):
         ] = candidate
         return candidate.candidate_id
 
-    def get_candidate(self, candidate_id: str) -> MemoryCandidate | None:
-        return self.candidates.get(candidate_id)
+    def get_candidate(
+        self, candidate_id: str, *, organization_id: str | None = None
+    ) -> MemoryCandidate | None:
+        return self.candidates.get(
+            candidate_id
+            if organization_id is None
+            else namespace_key(organization_id, candidate_id)
+        )
 
     def search(
         self, organization_id: str, project_id: str, query: str, agent_id: str | None = None
@@ -218,10 +230,12 @@ class TramaRuntime:
         self.dispatcher.recover(recovered_tasks)
         self._refresh_planning_state()
 
-    def _current_task_for_dispatch(self, task_id: str) -> TaskEnvelope | None:
+    def _current_task_for_dispatch(
+        self, organization_id: str, task_id: str
+    ) -> TaskEnvelope | None:
         self._refresh_state_catalog()
         with self._task_lock:
-            return self.tasks.get(task_id)
+            return self.tasks.get(namespace_key(organization_id, task_id))
 
     def _record_event(
         self,
@@ -289,9 +303,10 @@ class TramaRuntime:
             metadata=details,
         )
         with self._task_lock:
-            self.tasks[task.task_id] = task
+            task_key = namespace_key(task.organization_id, task.task_id)
+            self.tasks[task_key] = task
             if isinstance(self.coordination, InMemoryCoordination):
-                self.coordination.tasks[task.task_id] = task
+                self.coordination.tasks[task_key] = task
         self._refresh_planning_state()
         return True
 
@@ -319,25 +334,28 @@ class TramaRuntime:
             metadata={"task_id": task.task_id},
         )
         with self._task_lock:
-            self.tasks[task.task_id] = task
+            task_key = namespace_key(task.organization_id, task.task_id)
+            self.tasks[task_key] = task
             if isinstance(self.coordination, InMemoryCoordination):
-                self.coordination.tasks[task.task_id] = task
+                self.coordination.tasks[task_key] = task
 
     def _phase_dependencies_complete(self, phase: ProjectPhase) -> bool:
         return all(
-            self.phases.get(dependency) is not None
-            and self.phases[dependency].status == "completed"
+            self.phases.get(namespace_key(phase.organization_id, dependency)) is not None
+            and self.phases[namespace_key(phase.organization_id, dependency)].status
+            == "completed"
             for dependency in phase.depends_on
         )
 
     def _task_ready_for_dispatch(self, task: TaskEnvelope) -> bool:
         if task.phase_id is not None:
-            phase = self.phases.get(task.phase_id)
+            phase = self.phases.get(namespace_key(task.organization_id, task.phase_id))
             if phase is None or phase.status not in {"ready", "in_progress"}:
                 return False
         return all(
-            self.tasks.get(dependency) is not None
-            and self.tasks[dependency].state == "succeeded"
+            self.tasks.get(namespace_key(task.organization_id, dependency)) is not None
+            and self.tasks[namespace_key(task.organization_id, dependency)].state
+            == "succeeded"
             for dependency in task.depends_on
         )
 
@@ -347,7 +365,10 @@ class TramaRuntime:
             changed = False
             for phase in list(self.phases.values()):
                 phase_tasks = [
-                    task for task in self.tasks.values() if task.phase_id == phase.phase_id
+                    task
+                    for task in self.tasks.values()
+                    if task.organization_id == phase.organization_id
+                    and task.phase_id == phase.phase_id
                 ]
                 if phase_tasks and all(task.state == "succeeded" for task in phase_tasks):
                     desired = "completed"
@@ -361,7 +382,7 @@ class TramaRuntime:
                     desired = phase.status
                 if desired != phase.status:
                     updated = phase.model_copy(update={"status": desired})
-                    self.phases[phase.phase_id] = updated
+                    self.phases[namespace_key(phase.organization_id, phase.phase_id)] = updated
                     if self.state_store is not None:
                         self.state_store.save_phase(updated)
                     changed = True
@@ -369,7 +390,8 @@ class TramaRuntime:
                 requirement_phases = [
                     phase
                     for phase in self.phases.values()
-                    if phase.requirement_id == requirement.requirement_id
+                    if phase.organization_id == requirement.organization_id
+                    and phase.requirement_id == requirement.requirement_id
                 ]
                 if requirement_phases and all(
                     phase.status == "completed" for phase in requirement_phases
@@ -385,7 +407,9 @@ class TramaRuntime:
                     desired = requirement.status
                 if desired != requirement.status:
                     updated = requirement.model_copy(update={"status": desired})
-                    self.requirements[requirement.requirement_id] = updated
+                    self.requirements[
+                        namespace_key(requirement.organization_id, requirement.requirement_id)
+                    ] = updated
                     if self.state_store is not None:
                         self.state_store.save_requirement(updated)
                     changed = True
@@ -396,7 +420,7 @@ class TramaRuntime:
                     and self._task_ready_for_dispatch(task)
                 ):
                     updated = task.model_copy(update={"state": "accepted"})
-                    self.tasks[task.task_id] = updated
+                    self.tasks[namespace_key(task.organization_id, task.task_id)] = updated
                     self.dispatcher.submit(
                         updated,
                         persist=lambda item=updated: self._persist_task_acceptance(
@@ -418,16 +442,22 @@ class TramaRuntime:
         return project
 
     def register_requirement(self, requirement: Requirement) -> Requirement:
-        project = self.projects.get(requirement.project_id)
+        project = self.projects.get(
+            requirement.project_id, organization_id=requirement.organization_id
+        )
         if requirement.organization_id != project.organization_id:
             raise ValueError("La organizacion del requisito no coincide con el proyecto")
-        existing = self.requirements.get(requirement.requirement_id)
+        existing = self.requirements.get(
+            namespace_key(requirement.organization_id, requirement.requirement_id)
+        )
         if existing and existing.model_dump(mode="json") != requirement.model_dump(mode="json"):
             raise ValueError(
                 f"El requisito {requirement.requirement_id} ya esta registrado "
                 "con otra configuracion"
             )
-        self.requirements[requirement.requirement_id] = requirement
+        self.requirements[
+            namespace_key(requirement.organization_id, requirement.requirement_id)
+        ] = requirement
         if self.state_store is not None:
             self.state_store.save_requirement(requirement)
         self._record_event(
@@ -440,7 +470,9 @@ class TramaRuntime:
         return requirement
 
     def register_plan_proposal(self, proposal: PlanProposal) -> PlanProposal:
-        requirement = self.requirements.get(proposal.requirement_id)
+        requirement = self.requirements.get(
+            namespace_key(proposal.organization_id, proposal.requirement_id)
+        )
         if requirement is None:
             raise KeyError(f"El requisito {proposal.requirement_id} no esta registrado")
         if (
@@ -449,42 +481,44 @@ class TramaRuntime:
         ):
             raise ValueError("La propuesta no coincide con el namespace del requisito")
         for phase_id in proposal.phase_ids:
-            phase = self.phases.get(phase_id)
+            phase = self.phases.get(namespace_key(proposal.organization_id, phase_id))
             if phase is None:
                 raise KeyError(f"La fase {phase_id} no esta registrada")
             if phase.requirement_id != proposal.requirement_id:
                 raise ValueError("La fase de la propuesta no coincide con el requisito")
         for task_id in proposal.task_ids:
-            task = self.tasks.get(task_id)
+            task = self.tasks.get(namespace_key(proposal.organization_id, task_id))
             if task is None:
                 raise KeyError(f"La tarea {task_id} no esta registrada")
             if task.project_id != proposal.project_id:
                 raise ValueError("La tarea de la propuesta no coincide con el proyecto")
-        self.proposals[proposal.proposal_id] = proposal
+        self.proposals[namespace_key(proposal.organization_id, proposal.proposal_id)] = proposal
         if self.state_store is not None:
             self.state_store.save_plan_proposal(proposal)
         updated_requirement = requirement.model_copy(
             update={"correlation_id": proposal.correlation_id}
         )
-        self.requirements[requirement.requirement_id] = updated_requirement
+        self.requirements[
+            namespace_key(requirement.organization_id, requirement.requirement_id)
+        ] = updated_requirement
         if self.state_store is not None:
             self.state_store.save_requirement(updated_requirement)
         for phase_id in proposal.phase_ids:
-            phase = self.phases[phase_id]
+            phase = self.phases[namespace_key(proposal.organization_id, phase_id)]
             if phase.correlation_id != proposal.correlation_id:
                 updated_phase = phase.model_copy(
                     update={"correlation_id": proposal.correlation_id}
                 )
-                self.phases[phase_id] = updated_phase
+                self.phases[namespace_key(phase.organization_id, phase_id)] = updated_phase
                 if self.state_store is not None:
                     self.state_store.save_phase(updated_phase)
         for task_id in proposal.task_ids:
-            task = self.tasks[task_id]
+            task = self.tasks[namespace_key(proposal.organization_id, task_id)]
             if task.correlation_id != proposal.correlation_id:
                 updated_task = task.model_copy(
                     update={"correlation_id": proposal.correlation_id}
                 )
-                self.tasks[task_id] = updated_task
+                self.tasks[namespace_key(task.organization_id, task_id)] = updated_task
                 if self.state_store is not None:
                     self.state_store.save_task(updated_task)
         self._record_event(
@@ -498,8 +532,14 @@ class TramaRuntime:
         )
         return proposal
 
-    def approve_plan(self, proposal_id: str, *, approver: str) -> PlanProposal:
-        proposal = self.proposals.get(proposal_id)
+    def approve_plan(
+        self,
+        proposal_id: str,
+        *,
+        approver: str,
+        organization_id: str | None = None,
+    ) -> PlanProposal:
+        proposal = self.proposals.find(proposal_id, organization_id=organization_id)
         if proposal is None:
             raise KeyError(f"La propuesta {proposal_id} no esta registrada")
         if proposal.status != "proposed":
@@ -507,12 +547,17 @@ class TramaRuntime:
         if not approver.strip():
             raise ValueError("Se requiere un aprobador")
         for phase_id in proposal.phase_ids:
-            self.approve_phase(phase_id, approver=approver)
+            self.approve_phase(
+                phase_id, approver=approver, organization_id=proposal.organization_id
+            )
         for task_id in proposal.task_ids:
-            if self.tasks[task_id].state == "planned":
-                self.approve_task(task_id, approver=approver)
+            task = self.tasks[namespace_key(proposal.organization_id, task_id)]
+            if task.state == "planned":
+                self.approve_task(
+                    task_id, approver=approver, organization_id=proposal.organization_id
+                )
         approved = proposal.model_copy(update={"status": "approved", "approved_by": approver})
-        self.proposals[proposal_id] = approved
+        self.proposals[namespace_key(proposal.organization_id, proposal_id)] = approved
         if self.state_store is not None:
             self.state_store.save_plan_proposal(approved)
         self._record_event(
@@ -536,8 +581,10 @@ class TramaRuntime:
         return approved
 
     def register_phase(self, phase: ProjectPhase) -> ProjectPhase:
-        project = self.projects.get(phase.project_id)
-        requirement = self.requirements.get(phase.requirement_id)
+        project = self.projects.get(phase.project_id, organization_id=phase.organization_id)
+        requirement = self.requirements.get(
+            namespace_key(phase.organization_id, phase.requirement_id)
+        )
         if requirement is None:
             raise KeyError(f"El requisito {phase.requirement_id} no esta registrado")
         if (
@@ -545,10 +592,10 @@ class TramaRuntime:
             or requirement.project_id != phase.project_id
         ):
             raise ValueError("La fase no coincide con el namespace del proyecto")
-        existing = self.phases.get(phase.phase_id)
+        existing = self.phases.get(namespace_key(phase.organization_id, phase.phase_id))
         if existing and existing.model_dump(mode="json") != phase.model_dump(mode="json"):
             raise ValueError(f"La fase {phase.phase_id} ya esta registrada con otra configuracion")
-        self.phases[phase.phase_id] = phase
+        self.phases[namespace_key(phase.organization_id, phase.phase_id)] = phase
         if self.state_store is not None:
             self.state_store.save_phase(phase)
         self._record_event(
@@ -578,18 +625,43 @@ class TramaRuntime:
         if self.state_store is None:
             return
         self.projects.projects.update(
-            {project.project_id: project for project in self.state_store.load_projects()}
+            {
+                namespace_key(project.organization_id, project.project_id): project
+                for project in self.state_store.load_projects()
+            }
         )
         self.requirements.update(
-            {item.requirement_id: item for item in self.state_store.load_requirements()}
+            {
+                namespace_key(item.organization_id, item.requirement_id): item
+                for item in self.state_store.load_requirements()
+            }
         )
         self.proposals.update(
-            {item.proposal_id: item for item in self.state_store.load_plan_proposals()}
+            {
+                namespace_key(item.organization_id, item.proposal_id): item
+                for item in self.state_store.load_plan_proposals()
+            }
         )
-        self.phases.update({item.phase_id: item for item in self.state_store.load_phases()})
-        self.tasks.update({task.task_id: task for task in self.state_store.load_tasks()})
+        self.phases.update(
+            {
+                namespace_key(item.organization_id, item.phase_id): item
+                for item in self.state_store.load_phases()
+            }
+        )
+        self.tasks.update(
+            {
+                namespace_key(task.organization_id, task.task_id): task
+                for task in self.state_store.load_tasks()
+            }
+        )
+        stored_results = {
+            namespace_key(result.organization_id, result.task_id): result
+            for result in self.state_store.load_results()
+        }
+        self.results.update(stored_results)
         if isinstance(self.coordination, InMemoryCoordination):
             self.coordination.tasks.update(self.tasks)
+            self.coordination.results.update(stored_results)
 
     def _dispatch_admitted_task(self, task: TaskEnvelope, *, action: str) -> str:
         try:
@@ -613,13 +685,15 @@ class TramaRuntime:
         if task.repository != project.repository:
             raise ValueError("El repositorio de la tarea no coincide con el proyecto")
         if task.requirement_id is not None:
-            requirement = self.requirements.get(task.requirement_id)
+            requirement = self.requirements.get(
+                namespace_key(task.organization_id, task.requirement_id)
+            )
             if requirement is None:
                 raise KeyError(f"El requisito {task.requirement_id} no esta registrado")
             if requirement.project_id != task.project_id:
                 raise ValueError("El requisito de la tarea no coincide con el proyecto")
         if task.phase_id is not None:
-            phase = self.phases.get(task.phase_id)
+            phase = self.phases.get(namespace_key(task.organization_id, task.phase_id))
             if phase is None:
                 raise KeyError(f"La fase {task.phase_id} no esta registrada")
             if phase.project_id != task.project_id or phase.requirement_id != task.requirement_id:
@@ -678,7 +752,7 @@ class TramaRuntime:
                 )
         self.coordination.record_result(scoped_result)
         task_key = namespace_key(current_task.organization_id, result.task_id)
-        self.results[task_key] = result
+        self.results[task_key] = scoped_result
         self.tasks[task_key] = updated_task
         if isinstance(self.coordination, InMemoryCoordination):
             self.coordination.tasks[task_key] = updated_task
@@ -758,7 +832,9 @@ class TramaRuntime:
         return log
 
     def capture_memory(self, candidate: MemoryCandidate) -> str:
-        project = self.projects.get(candidate.project_id)
+        project = self.projects.get(
+            candidate.project_id, organization_id=candidate.organization_id
+        )
         if candidate.organization_id != project.organization_id:
             raise ValueError("La organizacion de la memoria no coincide con el proyecto")
         candidate_id = self.context_memory.put_candidate(candidate)
@@ -782,7 +858,9 @@ class TramaRuntime:
         organization_id: str | None = None,
         project_id: str | None = None,
     ) -> MemoryCandidate:
-        candidate = self.context_memory.get_candidate(candidate_id)
+        candidate = self.context_memory.get_candidate(
+            candidate_id, organization_id=organization_id
+        )
         if candidate is None:
             raise KeyError(f"El candidato {candidate_id} no existe")
         if (
@@ -799,7 +877,7 @@ class TramaRuntime:
         if not isinstance(candidates, ScopedStore):
             raise RuntimeError("El adaptador de memoria no permite revisar candidatos")
         updated = candidate.model_copy(update={"status": status})
-        candidates[candidate_id] = updated
+        candidates[namespace_key(updated.organization_id, candidate_id)] = updated
         if self.state_store is not None:
             self.state_store.save_candidate(updated)
         action = "memory.validate" if status == "validated" else "memory.reject"
@@ -826,16 +904,20 @@ class TramaRuntime:
     def search_memory(
         self, organization_id: str, project_id: str, query: str, agent_id: str | None = None
     ) -> list[MemoryCandidate]:
-        project = self.projects.get(project_id)
+        project = self.projects.get(project_id, organization_id=organization_id)
         if organization_id != project.organization_id:
             raise ValueError("La organizacion de la busqueda no coincide con el proyecto")
         return list(self.context_memory.search(organization_id, project_id, query, agent_id))
 
     def promote(self, request: PromotionRequest) -> str:
-        candidate = self.context_memory.get_candidate(request.candidate_id)
+        candidate = self.context_memory.get_candidate(
+            request.candidate_id, organization_id=request.organization_id
+        )
         if candidate is None:
             raise KeyError(f"El candidato {request.candidate_id} no existe")
-        project = self.projects.get(request.project_id)
+        project = self.projects.get(
+            request.project_id, organization_id=request.organization_id
+        )
         if request.organization_id != project.organization_id:
             raise ValueError("La organizacion de la promocion no coincide con el proyecto")
         promotion_id = self.canonical_knowledge.publish(request, candidate)
@@ -850,41 +932,69 @@ class TramaRuntime:
         )
         return promotion_id
 
-    def list_projects(self) -> list[ProjectManifest]:
+    def list_projects(self, organization_id: str | None = None) -> list[ProjectManifest]:
         self._refresh_state_catalog()
-        return list(self.projects.projects.values())
+        return [
+            item
+            for item in self.projects.projects.values()
+            if organization_id is None or item.organization_id == organization_id
+        ]
 
-    def list_requirements(self, project_id: str | None = None) -> list[Requirement]:
+    def list_requirements(
+        self, project_id: str | None = None, organization_id: str | None = None
+    ) -> list[Requirement]:
         self._refresh_state_catalog()
         items = list(self.requirements.values())
-        return [item for item in items if project_id is None or item.project_id == project_id]
+        return [
+            item
+            for item in items
+            if (organization_id is None or item.organization_id == organization_id)
+            and (project_id is None or item.project_id == project_id)
+        ]
 
-    def get_requirement(self, requirement_id: str) -> Requirement:
+    def get_requirement(
+        self, requirement_id: str, *, organization_id: str | None = None
+    ) -> Requirement:
         self._refresh_state_catalog()
         try:
-            return self.requirements[requirement_id]
+            return self.requirements.find(requirement_id, organization_id=organization_id)
         except KeyError as exc:
             raise KeyError(f"El requisito {requirement_id} no esta registrado") from exc
 
-    def list_phases(self, project_id: str | None = None) -> list[ProjectPhase]:
+    def list_phases(
+        self, project_id: str | None = None, organization_id: str | None = None
+    ) -> list[ProjectPhase]:
         self._refresh_state_catalog()
         items = sorted(
             self.phases.values(),
             key=lambda item: (item.project_id, item.sequence, item.phase_id),
         )
-        return [item for item in items if project_id is None or item.project_id == project_id]
+        return [
+            item
+            for item in items
+            if (organization_id is None or item.organization_id == organization_id)
+            and (project_id is None or item.project_id == project_id)
+        ]
 
-    def approve_phase(self, phase_id: str, *, approver: str) -> ProjectPhase:
+    def approve_phase(
+        self,
+        phase_id: str,
+        *,
+        approver: str,
+        organization_id: str | None = None,
+    ) -> ProjectPhase:
         self._refresh_state_catalog()
-        phase = self.phases.get(phase_id)
-        if phase is None:
-            raise KeyError(f"La fase {phase_id} no esta registrada")
+        try:
+            phase = self.phases.find(phase_id, organization_id=organization_id)
+        except KeyError as exc:
+            raise KeyError(f"La fase {phase_id} no esta registrada") from exc
         if not approver.strip():
             raise ValueError("Se requiere un aprobador")
         updated = phase.model_copy(update={"approved_by": approver, "status": "ready"})
         if not self._phase_dependencies_complete(updated):
             updated = updated.model_copy(update={"status": "planned"})
-        self.phases[phase_id] = updated
+        phase_key = namespace_key(updated.organization_id, phase_id)
+        self.phases[phase_key] = updated
         if self.state_store is not None:
             self.state_store.save_phase(updated)
         self._record_event(
@@ -895,11 +1005,17 @@ class TramaRuntime:
             details={"phase_id": phase_id, "approver": approver},
         )
         self._refresh_planning_state()
-        return self.phases[phase_id]
+        return self.phases[phase_key]
 
-    def approve_task(self, task_id: str, *, approver: str) -> TaskEnvelope:
+    def approve_task(
+        self,
+        task_id: str,
+        *,
+        approver: str,
+        organization_id: str | None = None,
+    ) -> TaskEnvelope:
         self._refresh_state_catalog()
-        task = self.get_task(task_id)
+        task = self.get_task(task_id, organization_id=organization_id)
         if task.state != "planned":
             raise ValueError(f"La tarea {task_id} no esta pendiente de aprobacion")
         if not approver.strip():
@@ -921,9 +1037,13 @@ class TramaRuntime:
         self._refresh_state_catalog()
         return self.projects.get(project_id, organization_id=organization_id)
 
-    def list_tasks(self) -> list[TaskEnvelope]:
+    def list_tasks(self, organization_id: str | None = None) -> list[TaskEnvelope]:
         self._refresh_state_catalog()
-        return list(self.tasks.values())
+        return [
+            item
+            for item in self.tasks.values()
+            if organization_id is None or item.organization_id == organization_id
+        ]
 
     def get_task(
         self, task_id: str, *, organization_id: str | None = None
@@ -934,15 +1054,29 @@ class TramaRuntime:
         except KeyError as exc:
             raise KeyError(f"La tarea {task_id} no esta registrada") from exc
 
-    def get_result(self, task_id: str) -> AgentResult:
-        result = self.results.get(task_id)
+    def get_result(
+        self, task_id: str, *, organization_id: str | None = None
+    ) -> AgentResult:
+        self._refresh_state_catalog()
+        try:
+            result = self.results.find(task_id, organization_id=organization_id)
+        except KeyError:
+            result = None
         if result is None and self.state_store is not None:
             result = next(
-                (item for item in self.state_store.load_results() if item.task_id == task_id),
+                (
+                    item
+                    for item in self.state_store.load_results()
+                    if item.task_id == task_id
+                    and (
+                        organization_id is None
+                        or item.organization_id == organization_id
+                    )
+                ),
                 None,
             )
             if result is not None:
-                self.results[task_id] = result
+                self.results[namespace_key(result.organization_id, task_id)] = result
         if result is None:
             raise KeyError(f"El resultado de la tarea {task_id} no esta registrado")
         return result
@@ -952,11 +1086,11 @@ class TramaRuntime:
         if log.organization_id != project.organization_id:
             raise ValueError("La organizacion del log no coincide con el proyecto")
         if log.task_id is not None:
-            task = self.get_task(log.task_id)
+            task = self.get_task(log.task_id, organization_id=log.organization_id)
             if task.project_id != log.project_id:
                 raise ValueError("La tarea del log no coincide con el proyecto")
         if log.phase_id is not None:
-            phase = self.phases.get(log.phase_id)
+            phase = self.phases.get(namespace_key(log.organization_id, log.phase_id))
             if phase is None:
                 raise KeyError(f"La fase {log.phase_id} no esta registrada")
             if phase.project_id != log.project_id:
@@ -969,14 +1103,27 @@ class TramaRuntime:
             self._logs.append(safe_log)
         return safe_log
 
-    def _event_items(self) -> list[OperationEvent]:
+    def _event_items(
+        self,
+        *,
+        organization_id: str | None = None,
+        project_id: str | None = None,
+    ) -> list[OperationEvent]:
         if self.state_store is not None:
-            return list(self.state_store.list_events(1000))
-        return list(self._events)
+            events = list(self.state_store.list_events(1000))
+        else:
+            events = list(self._events)
+        return [
+            event
+            for event in events
+            if (organization_id is None or event.organization_id == organization_id)
+            and (project_id is None or event.project_id == project_id)
+        ]
 
     def _log_items(
         self,
         *,
+        organization_id: str | None = None,
         task_id: str | None = None,
         phase_id: str | None = None,
         requirement_id: str | None = None,
@@ -985,6 +1132,7 @@ class TramaRuntime:
         if self.state_store is not None:
             return list(
                 self.state_store.list_task_logs(
+                    organization_id=organization_id,
                     task_id=task_id,
                     phase_id=phase_id,
                     requirement_id=requirement_id,
@@ -995,7 +1143,8 @@ class TramaRuntime:
         return [
             log
             for log in self._logs
-            if (task_id is None or log.task_id == task_id)
+            if (organization_id is None or log.organization_id == organization_id)
+            and (task_id is None or log.task_id == task_id)
             and (phase_id is None or log.phase_id == phase_id)
             and (requirement_id is None or log.requirement_id == requirement_id)
             and (project_id is None or log.project_id == project_id)
@@ -1049,33 +1198,62 @@ class TramaRuntime:
                 )
         return entries
 
-    def task_timeline(self, task_id: str, limit: int = 100) -> list[TimelineEntry]:
-        task = self.get_task(task_id)
+    def task_timeline(
+        self,
+        task_id: str,
+        limit: int = 100,
+        *,
+        organization_id: str | None = None,
+    ) -> list[TimelineEntry]:
+        task = self.get_task(task_id, organization_id=organization_id)
         events = [
             event
             for event in self._event_items()
-            if event.task_id == task_id or event.details.get("task_id") == task_id
+            if event.organization_id == task.organization_id
+            and (event.task_id == task_id or event.details.get("task_id") == task_id)
         ]
         entries = self._timeline_entries(
             events,
-            self._log_items(task_id=task_id, project_id=task.project_id),
+            self._log_items(
+                organization_id=task.organization_id,
+                task_id=task_id,
+                project_id=task.project_id,
+            ),
         )
         return entries[-max(1, min(limit, 1000)) :]
 
-    def phase_timeline(self, phase_id: str, limit: int = 100) -> list[TimelineEntry]:
-        phase = self.phases.get(phase_id)
-        if phase is None:
-            raise KeyError(f"La fase {phase_id} no esta registrada")
-        task_ids = {task.task_id for task in self.tasks.values() if task.phase_id == phase_id}
+    def phase_timeline(
+        self,
+        phase_id: str,
+        limit: int = 100,
+        *,
+        organization_id: str | None = None,
+    ) -> list[TimelineEntry]:
+        try:
+            phase = self.phases.find(phase_id, organization_id=organization_id)
+        except KeyError as exc:
+            raise KeyError(f"La fase {phase_id} no esta registrada") from exc
+        task_ids = {
+            task.task_id
+            for task in self.tasks.values()
+            if task.organization_id == phase.organization_id and task.phase_id == phase_id
+        }
         events = [
             event
             for event in self._event_items()
-            if event.phase_id == phase_id
-            or event.details.get("phase_id") == phase_id
-            or event.task_id in task_ids
-            or event.details.get("task_id") in task_ids
+            if event.organization_id == phase.organization_id
+            and (
+                event.phase_id == phase_id
+                or event.details.get("phase_id") == phase_id
+                or event.task_id in task_ids
+                or event.details.get("task_id") in task_ids
+            )
         ]
-        logs = self._log_items(phase_id=phase_id, project_id=phase.project_id)
+        logs = self._log_items(
+            organization_id=phase.organization_id,
+            phase_id=phase_id,
+            project_id=phase.project_id,
+        )
         entries = self._timeline_entries(events, logs)
         return entries[-max(1, min(limit, 1000)) :]
 
@@ -1103,6 +1281,7 @@ class TramaRuntime:
                 )
             )
         items = self._log_items(
+            organization_id=organization_id,
             task_id=task_id,
             phase_id=phase_id,
             requirement_id=requirement_id,
@@ -1114,10 +1293,12 @@ class TramaRuntime:
             items = [item for item in items if item.level == level]
         return items[-max(1, min(limit, 1000)) :]
 
-    def get_plan_proposal(self, proposal_id: str) -> PlanProposal:
+    def get_plan_proposal(
+        self, proposal_id: str, *, organization_id: str | None = None
+    ) -> PlanProposal:
         self._refresh_state_catalog()
         try:
-            return self.proposals[proposal_id]
+            return self.proposals.find(proposal_id, organization_id=organization_id)
         except KeyError as exc:
             raise KeyError(f"La propuesta {proposal_id} no esta registrada") from exc
 
@@ -1138,16 +1319,28 @@ class TramaRuntime:
             for items in groups.values()
         ]
 
-    def overview(self, project_id: str | None = None) -> dict[str, object]:
+    def overview(
+        self,
+        project_id: str | None = None,
+        *,
+        organization_id: str | None = None,
+    ) -> dict[str, object]:
+        self._refresh_state_catalog()
         tasks = [
             task
             for task in self.tasks.values()
-            if project_id is None or task.project_id == project_id
+            if (organization_id is None or task.organization_id == organization_id)
+            and (project_id is None or task.project_id == project_id)
         ]
-        phases = self.list_phases(project_id)
+        phases = self.list_phases(project_id, organization_id)
         phase_views: list[dict[str, object]] = []
         for phase in phases:
-            phase_tasks = [task for task in tasks if task.phase_id == phase.phase_id]
+            phase_tasks = [
+                task
+                for task in tasks
+                if task.organization_id == phase.organization_id
+                and task.phase_id == phase.phase_id
+            ]
             completed = sum(task.state == "succeeded" for task in phase_tasks)
             blocked = any(task.state in {"blocked", "failed"} for task in phase_tasks)
             phase_views.append(
@@ -1181,7 +1374,7 @@ class TramaRuntime:
             if task.state in {"planned", "accepted", "running", "blocked"}
         ]
         agents = []
-        for agent in self.list_agents():
+        for agent in self.list_agents(organization_id=organization_id):
             agent_tasks = [task for task in tasks if task.actor == agent["agent_id"]]
             agents.append(
                 {
@@ -1212,13 +1405,16 @@ class TramaRuntime:
             and not self._task_ready_for_dispatch(task)
         )
         activity = self._timeline_entries(
-            self._event_items(), self._log_items(project_id=project_id)
+            self._event_items(
+                organization_id=organization_id, project_id=project_id
+            ),
+            self._log_items(organization_id=organization_id, project_id=project_id),
         )
         return {
             "project_id": project_id,
             "requirements": [
                 item.model_dump(mode="json")
-                for item in self.list_requirements(project_id)
+                for item in self.list_requirements(project_id, organization_id)
             ],
             "phases": phase_views,
             "queue": queue,
@@ -1230,14 +1426,17 @@ class TramaRuntime:
             "latest_activity": [item.model_dump(mode="json") for item in activity[-12:]],
         }
 
-    def cancel_task(self, task_id: str) -> TaskEnvelope:
-        task = self.get_task(task_id)
+    def cancel_task(
+        self, task_id: str, *, organization_id: str | None = None
+    ) -> TaskEnvelope:
+        task = self.get_task(task_id, organization_id=organization_id)
         if task.state not in {"accepted", "running", "blocked"}:
             raise ValueError(f"La tarea {task_id} no se puede cancelar desde {task.state}")
         updated = task.model_copy(update={"state": "cancelled"})
-        self.tasks[task_id] = updated
+        task_key = namespace_key(updated.organization_id, task_id)
+        self.tasks[task_key] = updated
         if isinstance(self.coordination, InMemoryCoordination):
-            self.coordination.tasks[task_id] = updated
+            self.coordination.tasks[task_key] = updated
         if self.state_store is not None:
             self.state_store.save_task(updated)
         self._record_event(
@@ -1249,8 +1448,10 @@ class TramaRuntime:
         )
         return updated
 
-    def retry_task(self, task_id: str) -> TaskEnvelope:
-        task = self.get_task(task_id)
+    def retry_task(
+        self, task_id: str, *, organization_id: str | None = None
+    ) -> TaskEnvelope:
+        task = self.get_task(task_id, organization_id=organization_id)
         if task.state not in {"failed", "partial", "blocked", "cancelled"}:
             raise ValueError(f"La tarea {task_id} no se puede reintentar desde {task.state}")
         updated = task.model_copy(update={"state": "accepted", "execution_attempt": None})
@@ -1265,9 +1466,13 @@ class TramaRuntime:
         )
         return updated
 
-    def list_agents(self) -> list[dict[str, object]]:
+    def list_agents(
+        self, *, organization_id: str | None = None
+    ) -> list[dict[str, object]]:
         agents: dict[str, dict[str, object]] = {}
         for task in self.tasks.values():
+            if organization_id is not None and task.organization_id != organization_id:
+                continue
             agent = agents.setdefault(
                 task.actor,
                 {"agent_id": task.actor, "tasks": 0, "projects": set()},
@@ -1288,7 +1493,7 @@ class TramaRuntime:
     def list_memory_candidates(
         self, organization_id: str, project_id: str
     ) -> list[MemoryCandidate]:
-        project = self.projects.get(project_id)
+        project = self.projects.get(project_id, organization_id=organization_id)
         if organization_id != project.organization_id:
             raise ValueError("La organizacion de la memoria no coincide con el proyecto")
         candidates = getattr(self.context_memory, "candidates", {}).values()
@@ -1301,17 +1506,32 @@ class TramaRuntime:
     def get_memory_candidate(
         self, candidate_id: str, *, organization_id: str, project_id: str
     ) -> MemoryCandidate:
-        candidate = self.context_memory.get_candidate(candidate_id)
+        candidate = self.context_memory.get_candidate(
+            candidate_id, organization_id=organization_id
+        )
         if candidate is None:
             raise KeyError(f"El candidato {candidate_id} no existe")
         if candidate.organization_id != organization_id or candidate.project_id != project_id:
             raise KeyError(f"El candidato {candidate_id} no existe en el namespace solicitado")
         return candidate
 
-    def list_events(self, limit: int = 100) -> list[OperationEvent]:
+    def list_events(
+        self,
+        limit: int = 100,
+        *,
+        organization_id: str | None = None,
+        project_id: str | None = None,
+    ) -> list[OperationEvent]:
         if self.state_store is not None:
-            return list(self.state_store.list_events(limit))
-        return self._events[-max(1, min(limit, 1000)) :]
+            events = list(self.state_store.list_events(limit))
+        else:
+            events = self._events[-max(1, min(limit, 1000)) :]
+        return [
+            event
+            for event in events
+            if (organization_id is None or event.organization_id == organization_id)
+            and (project_id is None or event.project_id == project_id)
+        ]
 
     def status(self) -> dict[str, object]:
         if self.state_store is not None:
