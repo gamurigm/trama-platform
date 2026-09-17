@@ -20,7 +20,7 @@ from .contracts import (
     TimelineEntry,
 )
 from .leases import TaskLeaseManager, new_owner_id
-from .namespaces import can_promote, can_read_candidate
+from .namespaces import ScopedStore, can_promote, can_read_candidate, namespace_key
 from .observability import sanitize_message
 from .ports import CanonicalKnowledgePort, ContextMemoryPort, CoordinationPort, StateStorePort
 from .queueing import TaskDispatcher
@@ -28,27 +28,35 @@ from .queueing import TaskDispatcher
 
 @dataclass
 class InMemoryCoordination(CoordinationPort):
-    tasks: dict[str, TaskEnvelope] = field(default_factory=dict)
-    results: dict[str, AgentResult] = field(default_factory=dict)
+    tasks: ScopedStore[TaskEnvelope] = field(default_factory=ScopedStore)
+    results: ScopedStore[AgentResult] = field(default_factory=ScopedStore)
 
     def submit_task(self, task: TaskEnvelope) -> str:
-        if task.task_id in self.tasks:
+        key = namespace_key(task.organization_id, task.task_id)
+        if key in self.tasks:
             return task.task_id
-        self.tasks[task.task_id] = task
+        self.tasks[key] = task
         return task.task_id
 
     def record_result(self, result: AgentResult) -> None:
-        if result.task_id not in self.tasks:
-            raise KeyError(f"La tarea {result.task_id} no esta registrada")
-        self.results[result.task_id] = result
+        key = namespace_key(result.organization_id, result.task_id)
+        if key not in self.tasks:
+            try:
+                task = self.tasks.find(result.task_id)
+            except (KeyError, ValueError) as exc:
+                raise KeyError(f"La tarea {result.task_id} no esta registrada") from exc
+            key = namespace_key(task.organization_id, result.task_id)
+        self.results[key] = result
 
 
 @dataclass
 class InMemoryContextMemory(ContextMemoryPort):
-    candidates: dict[str, MemoryCandidate] = field(default_factory=dict)
+    candidates: ScopedStore[MemoryCandidate] = field(default_factory=ScopedStore)
 
     def put_candidate(self, candidate: MemoryCandidate) -> str:
-        self.candidates[candidate.candidate_id] = candidate
+        self.candidates[
+            namespace_key(candidate.organization_id, candidate.candidate_id)
+        ] = candidate
         return candidate.candidate_id
 
     def get_candidate(self, candidate_id: str) -> MemoryCandidate | None:
@@ -68,33 +76,34 @@ class InMemoryContextMemory(ContextMemoryPort):
 
 @dataclass
 class InMemoryCanonicalKnowledge(CanonicalKnowledgePort):
-    published: dict[str, PromotionRequest] = field(default_factory=dict)
+    published: ScopedStore[PromotionRequest] = field(default_factory=ScopedStore)
 
     def publish(self, request: PromotionRequest, candidate: MemoryCandidate) -> str:
         if not can_promote(request, candidate):
             raise PermissionError("La promocion no esta aprobada para el proyecto")
         if candidate.status != "validated":
             raise ValueError("Solo se puede publicar un candidato validado")
-        self.published[request.promotion_id] = request
+        self.published[namespace_key(request.organization_id, request.promotion_id)] = request
         return request.promotion_id
 
 
 @dataclass
 class ProjectRegistry:
-    projects: dict[str, ProjectManifest] = field(default_factory=dict)
+    projects: ScopedStore[ProjectManifest] = field(default_factory=ScopedStore)
 
     def register(self, manifest: ProjectManifest) -> ProjectManifest:
-        existing = self.projects.get(manifest.project_id)
+        key = namespace_key(manifest.organization_id, manifest.project_id)
+        existing = self.projects.get(key)
         if existing and existing.model_dump(mode="json") != manifest.model_dump(mode="json"):
             raise ValueError(
                 f"El proyecto {manifest.project_id} ya esta registrado con otra configuracion"
             )
-        self.projects[manifest.project_id] = manifest
+        self.projects[key] = manifest
         return manifest
 
-    def get(self, project_id: str) -> ProjectManifest:
+    def get(self, project_id: str, *, organization_id: str | None = None) -> ProjectManifest:
         try:
-            return self.projects[project_id]
+            return self.projects.find(project_id, organization_id=organization_id)
         except KeyError as exc:
             raise KeyError(f"El proyecto {project_id} no esta registrado") from exc
 
@@ -120,11 +129,11 @@ class TramaRuntime:
         self.canonical_knowledge = canonical_knowledge or InMemoryCanonicalKnowledge()
         self.state_store = state_store
         self.projects = ProjectRegistry()
-        self.requirements: dict[str, Requirement] = {}
-        self.phases: dict[str, ProjectPhase] = {}
-        self.tasks: dict[str, TaskEnvelope] = {}
-        self.results: dict[str, AgentResult] = {}
-        self.proposals: dict[str, PlanProposal] = {}
+        self.requirements: ScopedStore[Requirement] = ScopedStore()
+        self.phases: ScopedStore[ProjectPhase] = ScopedStore()
+        self.tasks: ScopedStore[TaskEnvelope] = ScopedStore()
+        self.results: ScopedStore[AgentResult] = ScopedStore()
+        self.proposals: ScopedStore[PlanProposal] = ScopedStore()
         self._events: list[OperationEvent] = []
         self._logs: list[TaskLog] = []
         self._task_lock = RLock()
@@ -140,18 +149,38 @@ class TramaRuntime:
 
         if self.state_store is not None:
             self.projects.projects.update(
-                {project.project_id: project for project in self.state_store.load_projects()}
+                {
+                    namespace_key(project.organization_id, project.project_id): project
+                    for project in self.state_store.load_projects()
+                }
             )
             self.requirements.update(
-                {item.requirement_id: item for item in self.state_store.load_requirements()}
+                {
+                    namespace_key(item.organization_id, item.requirement_id): item
+                    for item in self.state_store.load_requirements()
+                }
             )
             self.proposals.update(
-                {item.proposal_id: item for item in self.state_store.load_plan_proposals()}
+                {
+                    namespace_key(item.organization_id, item.proposal_id): item
+                    for item in self.state_store.load_plan_proposals()
+                }
             )
-            self.phases.update({item.phase_id: item for item in self.state_store.load_phases()})
-            self.tasks.update({task.task_id: task for task in self.state_store.load_tasks()})
+            self.phases.update(
+                {
+                    namespace_key(item.organization_id, item.phase_id): item
+                    for item in self.state_store.load_phases()
+                }
+            )
+            self.tasks.update(
+                {
+                    namespace_key(task.organization_id, task.task_id): task
+                    for task in self.state_store.load_tasks()
+                }
+            )
             stored_results = {
-                result.task_id: result for result in self.state_store.load_results()
+                namespace_key(result.organization_id, result.task_id): result
+                for result in self.state_store.load_results()
             }
             self.results.update(stored_results)
             if isinstance(self.coordination, InMemoryCoordination):
@@ -160,14 +189,14 @@ class TramaRuntime:
             if isinstance(self.context_memory, InMemoryContextMemory):
                 self.context_memory.candidates.update(
                     {
-                        candidate.candidate_id: candidate
+                        namespace_key(candidate.organization_id, candidate.candidate_id): candidate
                         for candidate in self.state_store.load_candidates()
                     }
                 )
             if isinstance(self.canonical_knowledge, InMemoryCanonicalKnowledge):
                 self.canonical_knowledge.published.update(
                     {
-                        promotion.promotion_id: promotion
+                        namespace_key(promotion.organization_id, promotion.promotion_id): promotion
                         for promotion in self.state_store.load_promotions()
                     }
                 )
@@ -563,7 +592,22 @@ class TramaRuntime:
             self.coordination.tasks.update(self.tasks)
 
     def _dispatch_admitted_task(self, task: TaskEnvelope, *, action: str) -> str:
-        project = self.projects.get(task.project_id)
+        try:
+            project = self.projects.get(task.project_id, organization_id=task.organization_id)
+        except KeyError as explicit_error:
+            try:
+                foreign_project = self.projects.get(task.project_id)
+            except (KeyError, ValueError) as lookup_error:
+                raise KeyError(
+                    f"El proyecto {task.project_id} no esta registrado"
+                ) from lookup_error
+            if foreign_project.organization_id != task.organization_id:
+                raise ValueError(
+                    "La organizacion de la tarea no coincide con el proyecto"
+                ) from explicit_error
+            raise KeyError(
+                f"El proyecto {task.project_id} no esta registrado"
+            ) from explicit_error
         if task.organization_id != project.organization_id:
             raise ValueError("La organizacion de la tarea no coincide con el proyecto")
         if task.repository != project.repository:
@@ -585,7 +629,7 @@ class TramaRuntime:
         if task.source == "requirement" and (task.requirement_id is None or task.phase_id is None):
             raise ValueError("Una tarea derivada requiere requirement_id y phase_id")
         with self._task_lock:
-            existing = self.tasks.get(task.task_id)
+            existing = self.tasks.get(namespace_key(task.organization_id, task.task_id))
             if existing:
                 existing_data = existing.model_dump(mode="json")
                 incoming_data = task.model_dump(mode="json")
@@ -606,12 +650,20 @@ class TramaRuntime:
 
     def record_result(self, result: AgentResult) -> None:
         self._refresh_state_catalog()
-        if result.task_id not in self.tasks:
-            raise KeyError(f"La tarea {result.task_id} no esta registrada")
-        current_task = self.tasks[result.task_id]
+        try:
+            current_task = self.tasks.find(
+                result.task_id, organization_id=result.organization_id
+            )
+        except KeyError:
+            if result.organization_id != "default":
+                raise
+            current_task = self.tasks.find(result.task_id)
+        scoped_result = result.model_copy(
+            update={"organization_id": current_task.organization_id}
+        )
         if (
             current_task.execution_attempt is not None
-            and result.execution_attempt != current_task.execution_attempt
+            and scoped_result.execution_attempt != current_task.execution_attempt
         ):
             raise ValueError(
                 f"El resultado de {result.task_id} pertenece a un intento obsoleto"
@@ -620,15 +672,16 @@ class TramaRuntime:
             update={"state": result.status}
         )
         if self.state_store is not None:
-            if not self.state_store.save_task_result(updated_task, result):
+            if not self.state_store.save_task_result(updated_task, scoped_result):
                 raise ValueError(
                     f"El resultado de {result.task_id} no pudo confirmar su lease actual"
                 )
-        self.coordination.record_result(result)
-        self.results[result.task_id] = result
-        self.tasks[result.task_id] = updated_task
+        self.coordination.record_result(scoped_result)
+        task_key = namespace_key(current_task.organization_id, result.task_id)
+        self.results[task_key] = result
+        self.tasks[task_key] = updated_task
         if isinstance(self.coordination, InMemoryCoordination):
-            self.coordination.tasks[result.task_id] = updated_task
+            self.coordination.tasks[task_key] = updated_task
         task = updated_task
         self._record_event(
             action="task.result",
@@ -743,7 +796,7 @@ class TramaRuntime:
                 f"El candidato {candidate_id} ya fue revisado como {candidate.status}"
             )
         candidates = getattr(self.context_memory, "candidates", None)
-        if not isinstance(candidates, dict):
+        if not isinstance(candidates, ScopedStore):
             raise RuntimeError("El adaptador de memoria no permite revisar candidatos")
         updated = candidate.model_copy(update={"status": status})
         candidates[candidate_id] = updated
@@ -862,18 +915,22 @@ class TramaRuntime:
             self._persist_task_acceptance(updated, action="task.approve")
         return updated
 
-    def get_project(self, project_id: str) -> ProjectManifest:
+    def get_project(
+        self, project_id: str, *, organization_id: str | None = None
+    ) -> ProjectManifest:
         self._refresh_state_catalog()
-        return self.projects.get(project_id)
+        return self.projects.get(project_id, organization_id=organization_id)
 
     def list_tasks(self) -> list[TaskEnvelope]:
         self._refresh_state_catalog()
         return list(self.tasks.values())
 
-    def get_task(self, task_id: str) -> TaskEnvelope:
+    def get_task(
+        self, task_id: str, *, organization_id: str | None = None
+    ) -> TaskEnvelope:
         self._refresh_state_catalog()
         try:
-            return self.tasks[task_id]
+            return self.tasks.find(task_id, organization_id=organization_id)
         except KeyError as exc:
             raise KeyError(f"La tarea {task_id} no esta registrada") from exc
 
@@ -891,7 +948,7 @@ class TramaRuntime:
         return result
 
     def record_task_log(self, log: TaskLog) -> TaskLog:
-        project = self.projects.get(log.project_id)
+        project = self.projects.get(log.project_id, organization_id=log.organization_id)
         if log.organization_id != project.organization_id:
             raise ValueError("La organizacion del log no coincide con el proyecto")
         if log.task_id is not None:

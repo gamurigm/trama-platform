@@ -186,6 +186,7 @@ class Verification(TramaContract):
 
 class AgentResult(TramaContract):
     schema_version: Literal["1.0"] = "1.0"
+    organization_id: str = Field(default="default", min_length=1, max_length=100)
     task_id: str = Field(min_length=1, max_length=100)
     execution_attempt: int = Field(default=1, ge=1, le=1_000_000_000)
     status: Literal["succeeded", "partial", "failed", "blocked"]

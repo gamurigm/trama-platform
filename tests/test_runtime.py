@@ -115,6 +115,32 @@ def test_runtime_exposes_a_recorded_task_result():
     assert runtime.get_result("task-result") == result
 
 
+def test_runtime_isolates_same_project_and_task_ids_by_organization():
+    runtime = TramaRuntime()
+    runtime.register_project(
+        ProjectManifest(project_id="demo", organization_id="org-a", repository="repo-a")
+    )
+    runtime.register_project(
+        ProjectManifest(project_id="demo", organization_id="org-b", repository="repo-b")
+    )
+
+    task_a = task("task-1").model_copy(
+        update={"organization_id": "org-a", "repository": "repo-a"}
+    )
+    task_b = task("task-1").model_copy(
+        update={"organization_id": "org-b", "repository": "repo-b"}
+    )
+    runtime.submit_task(task_a)
+    runtime.submit_task(task_b)
+
+    assert runtime.get_project("demo", organization_id="org-a").repository == "repo-a"
+    assert runtime.get_project("demo", organization_id="org-b").repository == "repo-b"
+    assert runtime.get_task("task-1", organization_id="org-a") == task_a
+    assert runtime.get_task("task-1", organization_id="org-b") == task_b
+    with pytest.raises(ValueError, match="ambigua"):
+        runtime.get_task("task-1")
+
+
 def test_runtime_reviews_memory_candidate_before_promotion():
     runtime = TramaRuntime()
     runtime.register_project(scoped_manifest())
