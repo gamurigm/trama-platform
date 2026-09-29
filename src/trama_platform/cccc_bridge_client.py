@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
+from time import perf_counter
 from urllib.parse import urlsplit
 
 import httpx
 
 from .contracts import AgentResult, TaskEnvelope
 from .ports import CoordinationPort
+
+logger = logging.getLogger(__name__)
 
 
 class CcccBridgeCoordination(CoordinationPort):
@@ -51,12 +55,40 @@ class CcccBridgeCoordination(CoordinationPort):
         self.timeout_seconds = timeout_seconds
 
     def submit_task(self, task: TaskEnvelope) -> str:
-        response = self._client.post("/v1/tasks", json=task.model_dump(mode="json"))
-        response.raise_for_status()
-        payload = response.json()
-        tracking_id = payload.get("tracking_id") if isinstance(payload, dict) else None
-        if not isinstance(tracking_id, str) or not tracking_id:
-            raise ValueError("CCCC bridge response did not include a tracking ID")
+        started = perf_counter()
+        logger.info(
+            "CCCC bridge task dispatch started",
+            extra={"event": "cccc_bridge_dispatch_started", "task_id": task.task_id},
+        )
+        try:
+            response = self._client.post("/v1/tasks", json=task.model_dump(mode="json"))
+            response.raise_for_status()
+            payload = response.json()
+            tracking_id = payload.get("tracking_id") if isinstance(payload, dict) else None
+            if not isinstance(tracking_id, str) or not tracking_id:
+                raise ValueError("CCCC bridge response did not include a tracking ID")
+        except Exception as exc:
+            logger.warning(
+                "CCCC bridge task dispatch failed",
+                extra={
+                    "event": "cccc_bridge_dispatch_failed",
+                    "task_id": task.task_id,
+                    "status": "failed",
+                    "dispatch_duration_ms": round((perf_counter() - started) * 1000, 3),
+                    "error_type": type(exc).__name__,
+                },
+            )
+            raise
+        logger.info(
+            "CCCC bridge task dispatch completed",
+            extra={
+                "event": "cccc_bridge_dispatch_completed",
+                "task_id": task.task_id,
+                "tracking_id": tracking_id,
+                "status": "success",
+                "dispatch_duration_ms": round((perf_counter() - started) * 1000, 3),
+            },
+        )
         return tracking_id
 
     def record_result(self, result: AgentResult) -> None:

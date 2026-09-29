@@ -1,5 +1,6 @@
 import importlib
 import importlib.util
+import logging
 
 import httpx
 import pytest
@@ -91,4 +92,60 @@ def test_bridge_client_propagates_http_errors_and_timeouts(handler):
     with pytest.raises(httpx.HTTPError):
         client.submit_task(make_task())
 
+    client.close()
+
+
+def test_bridge_client_logs_task_id_and_duration_without_payload_or_token(caplog):
+    def handler(_):
+        return httpx.Response(200, json={"tracking_id": "cccc-track-1"})
+
+    client = make_client(handler)
+    task = make_task()
+    task.objective = "PRIVATE_TASK_TEXT_MUST_NOT_BE_LOGGED"
+
+    with caplog.at_level(logging.INFO, logger="trama_platform.cccc_bridge_client"):
+        tracking_id = client.submit_task(task)
+
+    records = [
+        record
+        for record in caplog.records
+        if record.name == "trama_platform.cccc_bridge_client"
+    ]
+    assert tracking_id == "cccc-track-1"
+    assert any(record.getMessage() == "CCCC bridge task dispatch started" for record in records)
+    completed = next(
+        record for record in records if record.getMessage() == "CCCC bridge task dispatch completed"
+    )
+    assert completed.task_id == "bridge-task-1"
+    assert completed.tracking_id == "cccc-track-1"
+    assert completed.status == "success"
+    assert completed.dispatch_duration_ms >= 0
+    assert not hasattr(completed, "python_handoff_ms")
+    assert "PRIVATE_TASK_TEXT_MUST_NOT_BE_LOGGED" not in caplog.text
+    assert "bridge-test-token" not in caplog.text
+    client.close()
+
+
+def test_bridge_client_logs_failed_dispatch_duration(caplog):
+    def handler(_):
+        return httpx.Response(503, json={"detail": "bridge unavailable"})
+
+    client = make_client(handler)
+
+    with caplog.at_level(logging.INFO, logger="trama_platform.cccc_bridge_client"):
+        with pytest.raises(httpx.HTTPStatusError):
+            client.submit_task(make_task())
+
+    failed = next(
+        record
+        for record in caplog.records
+        if record.name == "trama_platform.cccc_bridge_client"
+        and record.getMessage() == "CCCC bridge task dispatch failed"
+    )
+    assert failed.task_id == "bridge-task-1"
+    assert failed.status == "failed"
+    assert failed.dispatch_duration_ms >= 0
+    assert not hasattr(failed, "python_handoff_ms")
+    assert "bridge-test-token" not in caplog.text
+    assert "bridge unavailable" not in caplog.text
     client.close()

@@ -97,6 +97,10 @@ services:
       TRAMA_NATS_STREAM: TRAMA_EVENTS
       TRAMA_NATS_SUBJECT: trama.task.admitted.v1
       TRAMA_NATS_DURABLE: trama-python-dispatch
+      TRAMA_COORDINATION_BACKEND: ${TRAMA_COORDINATION_BACKEND:-memory}
+      TRAMA_CCCC_BRIDGE_URL: ${TRAMA_CCCC_BRIDGE_URL:-http://host.docker.internal:8091}
+      TRAMA_CCCC_BRIDGE_TOKEN: ${TRAMA_CCCC_BRIDGE_TOKEN:-}
+      TRAMA_CCCC_BRIDGE_TIMEOUT_SECONDS: ${TRAMA_CCCC_BRIDGE_TIMEOUT_SECONDS:-35}
     volumes:
       - python-state:/data/state
     depends_on:

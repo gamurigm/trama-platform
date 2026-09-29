@@ -25,6 +25,8 @@ TRAMA Control Plane Python
   +--> Cola local SQLite solo para desarrollo aislado
   |
   +--> CCCC: tareas, actores, estados, mensajes y handoffs
+  |      ^
+  |      +-- HTTP autenticado --> puente local del host Windows
   |
   +--> Codex / OpenCode / otros agentes
   |
@@ -107,6 +109,14 @@ un cambio completo aunque varias fases corran en paralelo. `OperationEvent`
 representa transiciones auditables; `TaskLog` representa mensajes de agentes,
 handoffs, duración y diagnósticos. Ambos se pueden combinar en un
 `TimelineEntry` por tarea o fase.
+
+El worker puede usar `TRAMA_COORDINATION_BACKEND=cccc-bridge` para llegar al
+CCCC del host Windows mediante un puente HTTP autenticado y de alcance local.
+El backend predeterminado sigue siendo `memory`. Cada intento registra el
+`task_id`, el `tracking_id` de CCCC y `dispatch_duration_ms`, que mide el envío
+HTTP hasta la aceptación del `tracked-send`. La admisión del Gateway Go, el
+outbox, la entrega NATS y `python_handoff_ms` son mediciones distintas; ninguna
+de ellas prueba el inicio del modelo o la primera respuesta del actor.
 
 La API expone `/v1/tasks/{task_id}/timeline`,
 `/v1/phases/{phase_id}/timeline`, `/v1/logs` y `/v1/plans/{proposal_id}`.
