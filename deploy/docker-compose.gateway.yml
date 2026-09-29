@@ -114,6 +114,10 @@ services:
       TRAMA_NATS_DURABLE: trama-python-dispatch
       TRAMA_NATS_ACK_WAIT_SECONDS: "30"
       TRAMA_NATS_MAX_DELIVER: "5"
+      TRAMA_COORDINATION_BACKEND: ${TRAMA_COORDINATION_BACKEND:-memory}
+      TRAMA_CCCC_BRIDGE_URL: ${TRAMA_CCCC_BRIDGE_URL:-http://host.docker.internal:8091}
+      TRAMA_CCCC_BRIDGE_TOKEN: ${TRAMA_CCCC_BRIDGE_TOKEN:-}
+      TRAMA_CCCC_BRIDGE_TIMEOUT_SECONDS: ${TRAMA_CCCC_BRIDGE_TIMEOUT_SECONDS:-35}
     depends_on:
       outbox:
         condition: service_started

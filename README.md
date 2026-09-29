@@ -169,6 +169,66 @@ trama status --json
 
 El estado debe mostrar `coordination: CcccCliAdapter`. El backend CCCC usa
 `cccc tracked-send` para entregar tareas y `cccc send` para devolver resultados.
+
+#### CCCC del host Windows desde el worker Docker
+
+Para que el worker Python en Docker despache por el puente local al CCCC
+instalado en Windows, deja el daemon de CCCC en el host y configura el worker
+con `TRAMA_COORDINATION_BACKEND=cccc-bridge`. Compose mantiene `memory` como
+valor predeterminado. En PowerShell, define el token fuera del repositorio y
+selecciona la dirección privada del host que sea alcanzable desde Docker:
+
+```powershell
+$env:TRAMA_COORDINATION_BACKEND = "cccc-bridge"
+$env:TRAMA_CCCC_BRIDGE_URL = "http://host.docker.internal:8091"
+$env:TRAMA_CCCC_BRIDGE_TOKEN = "<token-local-compartido-con-TRAMA>"
+```
+
+Inicia el puente en otra terminal PowerShell del host. Elige una IP privada del
+host accesible desde el worker; `127.0.0.1` solo sirve para clientes del mismo
+host y el comando rechaza direcciones comodín o públicas:
+
+```powershell
+trama cccc-bridge --host <IP-privada-del-host> --port 8091
+```
+
+Restringe el firewall de Windows a esa IP local y a la subred Docker real. Para
+identificar la subred, consulta `docker network inspect trama-gateway_default`
+desde WSL. Crea una regla de entrada acotada; reemplaza ambos marcadores por los
+valores observados y no uses `Any` como dirección remota:
+
+```powershell
+New-NetFirewallRule -DisplayName "TRAMA CCCC bridge" -Direction Inbound -Action Allow `
+  -Profile Private -Protocol TCP -LocalAddress <IP-privada-del-host> `
+  -LocalPort 8091 -RemoteAddress <CIDR-de-la-subred-Docker>
+```
+
+Revisa la regla y la ruta del worker antes de habilitar el backend. El token del
+puente se suministra en el entorno de Compose y no se guarda en archivos
+versionados.
+
+En la terminal WSL que ejecuta Compose, exporta el mismo backend, URL y token;
+las variables de PowerShell no siempre llegan automáticamente a WSL. Luego
+recrea el worker desde la raíz del checkout:
+
+```bash
+export TRAMA_COORDINATION_BACKEND=cccc-bridge
+export TRAMA_CCCC_BRIDGE_URL=http://host.docker.internal:8091
+export TRAMA_CCCC_BRIDGE_TOKEN='<token-local-compartido-con-TRAMA>'
+docker compose -f deploy/docker-compose.gateway.yml up -d --build python-worker
+```
+
+El URL puede cambiarse por la IP privada del host si `host.docker.internal` no
+es alcanzable en esa instalación. Para volver al modo local, elimina esas
+variables o configura `TRAMA_COORDINATION_BACKEND=memory` y recrea el worker.
+Detén el puente con `Ctrl+C`; al finalizar el uso, detén también el daemon de
+CCCC con `cccc daemon stop`.
+
+Los logs del worker registran `task_id`, `tracking_id`, `status` y
+`dispatch_duration_ms` para el intento HTTP del worker al puente. Esa duración
+termina cuando CCCC acepta el `tracked-send`; no representa el inicio del
+modelo ni la primera respuesta del actor. `python_handoff_ms`, cuando se mide en
+el gateway, es otra etapa y no debe interpretarse como confirmación de CCCC.
 Hermes se integra como proceso externo supervisado:
 
 ```powershell
