@@ -29,11 +29,13 @@ the bridge over a private Docker-to-host route; the bridge invokes the installed
 CCCC CLI with a fixed command shape. No arbitrary executable, shell string, or
 CLI arguments come from the task payload.
 
-The bridge exposes one authenticated operation: submit a task to CCCC. Its
-recipient is configured or allowlisted locally. The request contains the
-validated task envelope and task ID. The bridge uses the task ID as the CCCC
-idempotency key and uses the existing `tracked-send` operation. It returns the
-CCCC tracking identifier when available.
+The bridge exposes two authenticated operations: submit a task to CCCC and
+forward an `AgentResult` to the configured result recipient. Task submissions
+carry the validated task envelope and task ID. The bridge uses the task ID as
+the CCCC idempotency key and invokes the existing `tracked-send` operation.
+Task recipients and the result recipient are configured or allowlisted locally;
+the bridge never accepts arbitrary CLI arguments from a request. It returns
+the CCCC tracking identifier when available.
 
 The Python worker constructs a bridge-backed `CoordinationPort` when that
 backend is selected. The default remains in-memory for local development. The
@@ -50,6 +52,9 @@ can tell which path is active.
    the handoff, not that an agent started model inference.
 6. If available, CCCC ledger/runtime timestamps are correlated by task ID to
    measure agent start or first response separately.
+7. When TRAMA receives an `AgentResult`, its coordination adapter forwards it
+   through the bridge to the configured CCCC result recipient using the
+   existing `send` operation.
 
 Emit structured timing for bridge request duration and CCCC acknowledgement,
 with task ID and tracking ID. Continue to use the existing admission, outbox,
@@ -67,6 +72,10 @@ is unavailable.
 - Construct CCCC invocations as argument arrays, never through a shell.
 - Use the task ID for idempotency so JetStream redelivery does not create a
   second CCCC task.
+- Fix the result recipient in local bridge configuration; do not let an
+  `AgentResult` choose an arbitrary CCCC recipient.
+- Validate task and result payloads before invoking CCCC, and return a failed
+  dispatch when CCCC rejects or times out.
 - A bridge failure must be visible as a failed dispatch in TRAMA and retain the
   existing retry path. It must not be reported as a successful CCCC handoff.
 - A read-only latency probe must contain explicit no-file-change and no-command
@@ -83,6 +92,9 @@ the first model token. It does not add Redis to the task dispatch path.
 
 - The worker reports the configured CCCC bridge backend rather than silently
   using in-memory coordination.
+- Both `CoordinationPort.submit_task` and `CoordinationPort.record_result`
+  work through the bridge and preserve the configured task and result
+  recipients.
 - A safe task submitted through the Go gateway is correlated through gateway,
   outbox, NATS, Python worker, bridge, and CCCC tracking ID.
 - The timing report separates gateway-to-Python handoff from Python-to-CCCC
