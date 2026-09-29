@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import sys
 from pathlib import Path
@@ -92,8 +93,33 @@ def build_coordination(settings: TramaSettings) -> CoordinationPort | None:
             timeout_seconds=settings.cccc_timeout_seconds,
         )
     raise ValueError(
-        "TRAMA_COORDINATION_BACKEND debe ser 'memory' o 'cccc'"
+        "TRAMA_COORDINATION_BACKEND debe ser 'memory', 'cccc' o 'cccc-bridge'"
     )
+
+
+def run_cccc_bridge(settings: TramaSettings, host: str, port: int) -> None:
+    """Serve the CCCC bridge only on loopback or a private host interface."""
+
+    if host.casefold() == "localhost":
+        host = "127.0.0.1"
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        raise ValueError(
+            "CCCC bridge bind must use a loopback or private interface IP"
+        ) from None
+    if address.is_unspecified or address.is_multicast or not (
+        address.is_loopback or address.is_private
+    ):
+        raise ValueError("CCCC bridge bind must use a loopback or private interface IP")
+    if not 1 <= port <= 65535:
+        raise ValueError("CCCC bridge port must be between 1 and 65535")
+
+    import uvicorn
+
+    from .cccc_bridge import create_cccc_bridge_app
+
+    uvicorn.run(create_cccc_bridge_app(settings), host=host, port=port)
 
 
 def build_context_memory(settings: TramaSettings):
@@ -139,6 +165,12 @@ def _add_api_options(parser: argparse.ArgumentParser, settings: TramaSettings) -
 
 
 def _add_control_commands(subparsers: argparse._SubParsersAction, settings: TramaSettings) -> None:
+    bridge_parser = subparsers.add_parser(
+        "cccc-bridge", help="Sirve el puente local autenticado hacia CCCC"
+    )
+    bridge_parser.add_argument("--host", default=settings.cccc_bridge_host)
+    bridge_parser.add_argument("--port", type=int, default=settings.cccc_bridge_port)
+
     up_parser = subparsers.add_parser("up", help="Inicia el control plane local")
     up_parser.add_argument("--json", action="store_true", dest="as_json")
     down_parser = subparsers.add_parser("down", help="Detiene el control plane iniciado por TRAMA")
@@ -242,6 +274,10 @@ def _add_control_commands(subparsers: argparse._SubParsersAction, settings: Tram
 def _run_control_command(args: argparse.Namespace) -> None:
     if args.command == "worker":
         run_task_worker(TramaSettings.from_env())
+        return
+
+    if args.command == "cccc-bridge":
+        run_cccc_bridge(TramaSettings.from_env(), args.host, args.port)
         return
 
     if args.command in {"up", "down"}:
@@ -466,6 +502,7 @@ def main() -> None:
             else:
                 run_mcp(args.api_url)
     elif args.command in {
+        "cccc-bridge",
         "up",
         "down",
         "status",
