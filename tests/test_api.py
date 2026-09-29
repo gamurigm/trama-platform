@@ -148,14 +148,18 @@ def test_api_restores_projects_tasks_and_events_after_runtime_restart(tmp_path):
 
 def test_api_status_counts_results_with_external_coordination(tmp_path):
     class FakeCoordination:
+        def __init__(self):
+            self.results = []
+
         def submit_task(self, task):
             return task.task_id
 
         def record_result(self, result):
-            return None
+            self.results.append(result)
 
+    coordination = FakeCoordination()
     runtime = TramaRuntime(
-        coordination=FakeCoordination(),
+        coordination=coordination,
         state_store=SqliteStateStore(tmp_path / "trama.db"),
     )
     client = TestClient(create_app(runtime))
@@ -181,6 +185,7 @@ def test_api_status_counts_results_with_external_coordination(tmp_path):
         json={"task_id": "task-1", "status": "succeeded", "summary": "ok"},
     ).status_code == 202
 
+    assert [result.task_id for result in coordination.results] == ["task-1"]
     assert client.get("/v1/status").json()["results"] == 1
 
 

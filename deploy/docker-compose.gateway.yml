@@ -91,6 +91,10 @@ services:
       TRAMA_DATABASE_URL: postgresql://trama:trama-local-only@postgres:5432/trama?sslmode=disable
       TRAMA_REQUIRE_TENANT_CONTEXT: "false"
       TRAMA_INTERNAL_SERVICE_TOKEN: ${TRAMA_CONTROL_PLANE_INTERNAL_TOKEN:-trama-local-internal-only}
+      TRAMA_COORDINATION_BACKEND: ${TRAMA_COORDINATION_BACKEND:-memory}
+      TRAMA_CCCC_BRIDGE_URL: ${TRAMA_CCCC_BRIDGE_URL:-http://host.docker.internal:8091}
+      TRAMA_CCCC_BRIDGE_TOKEN: ${TRAMA_CCCC_BRIDGE_TOKEN:-}
+      TRAMA_CCCC_BRIDGE_TIMEOUT_SECONDS: ${TRAMA_CCCC_BRIDGE_TIMEOUT_SECONDS:-35}
     expose:
       - "8090"
     depends_on:

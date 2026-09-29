@@ -172,55 +172,57 @@ El estado debe mostrar `coordination: CcccCliAdapter`. El backend CCCC usa
 
 #### CCCC del host Windows desde el worker Docker
 
-Para que el worker Python en Docker despache por el puente local al CCCC
-instalado en Windows, deja el daemon de CCCC en el host y configura el worker
-con `TRAMA_COORDINATION_BACKEND=cccc-bridge`. Compose mantiene `memory` como
-valor predeterminado. En PowerShell, define el token fuera del repositorio y
-selecciona la dirección privada del host que sea alcanzable desde Docker:
+Para que el worker Python y el control plane en Docker usen el puente hacia el
+CCCC instalado en Windows, deja el daemon de CCCC en el host y configura
+`TRAMA_COORDINATION_BACKEND=cccc-bridge`. Compose mantiene `memory` como valor
+predeterminado. Escoge una dirección privada de Windows alcanzable desde WSL;
+en esta máquina es la IP de `vEthernet (WSL)`, que puedes consultar con:
 
 ```powershell
-$env:TRAMA_COORDINATION_BACKEND = "cccc-bridge"
-$env:TRAMA_CCCC_BRIDGE_URL = "http://host.docker.internal:8091"
-$env:TRAMA_CCCC_BRIDGE_TOKEN = "<token-local-compartido-con-TRAMA>"
+Get-NetIPAddress -InterfaceAlias "vEthernet (WSL)" -AddressFamily IPv4
 ```
 
-Inicia el puente en otra terminal PowerShell del host. Elige una IP privada del
-host accesible desde el worker; `127.0.0.1` solo sirve para clientes del mismo
-host y el comando rechaza direcciones comodín o públicas:
+En la terminal PowerShell que ejecutará el puente, configura un actor aprobado,
+el destinatario local de resultados y un token compartido con Compose. El token
+se pide sin mostrarlo ni escribirlo en el historial:
 
 ```powershell
-trama cccc-bridge --host <IP-privada-del-host> --port 8091
+$env:TRAMA_CCCC_ALLOWED_ACTORS = "<actor-CCCC-aprobado>"
+$env:TRAMA_CCCC_RESULT_RECIPIENT = "foreman"
+$secure = Read-Host "Token local del puente" -AsSecureString
+$env:TRAMA_CCCC_BRIDGE_TOKEN = [System.Net.NetworkCredential]::new("", $secure).Password
+Remove-Variable secure
+trama cccc-bridge --host <IP-de-vEthernet-WSL> --port 8091
 ```
 
-Restringe el firewall de Windows a esa IP local y a la subred Docker real. Para
-identificar la subred, consulta `docker network inspect trama-gateway_default`
-desde WSL. Crea una regla de entrada acotada; reemplaza ambos marcadores por los
-valores observados y no uses `Any` como dirección remota:
+El comando rechaza direcciones comodín o públicas. Limita también el firewall
+de Windows al adaptador WSL y al origen visto por Windows. En WSL2 con NAT,
+Windows ve la IP de la VM WSL, no la subred de Docker. Consulta las direcciones
+con `wsl.exe -- sh -lc "hostname -I"` y crea la regla desde PowerShell como
+administrador, sustituyendo ambas direcciones por las actuales:
 
 ```powershell
 New-NetFirewallRule -DisplayName "TRAMA CCCC bridge" -Direction Inbound -Action Allow `
-  -Profile Private -Protocol TCP -LocalAddress <IP-privada-del-host> `
-  -LocalPort 8091 -RemoteAddress <CIDR-de-la-subred-Docker>
+  -Profile Any -Protocol TCP -LocalAddress <IP-de-vEthernet-WSL> `
+  -LocalPort 8091 -RemoteAddress <IP-de-la-VM-WSL>
 ```
 
-Revisa la regla y la ruta del worker antes de habilitar el backend. El token del
-puente se suministra en el entorno de Compose y no se guarda en archivos
-versionados.
-
-En la terminal WSL que ejecuta Compose, exporta el mismo backend, URL y token;
-las variables de PowerShell no siempre llegan automáticamente a WSL. Luego
-recrea el worker desde la raíz del checkout:
+En la terminal WSL que ejecuta Compose, configura backend y URL. Si
+`host.docker.internal` no resuelve, usa la misma IP de `vEthernet (WSL)` como
+host. Introduce el mismo token en el prompt oculto y recrea ambos procesos para
+que el envío de tareas y el reenvío de `AgentResult` compartan el adaptador:
 
 ```bash
 export TRAMA_COORDINATION_BACKEND=cccc-bridge
-export TRAMA_CCCC_BRIDGE_URL=http://host.docker.internal:8091
-export TRAMA_CCCC_BRIDGE_TOKEN='<token-local-compartido-con-TRAMA>'
-docker compose -f deploy/docker-compose.gateway.yml up -d --build python-worker
+export TRAMA_CCCC_BRIDGE_URL=http://<IP-de-vEthernet-WSL>:8091
+read -r -s -p 'Token local del puente: ' TRAMA_CCCC_BRIDGE_TOKEN
+printf '\n'
+export TRAMA_CCCC_BRIDGE_TOKEN
+docker compose -f deploy/docker-compose.gateway.yml up -d --build control-plane python-worker
 ```
 
-El URL puede cambiarse por la IP privada del host si `host.docker.internal` no
-es alcanzable en esa instalación. Para volver al modo local, elimina esas
-variables o configura `TRAMA_COORDINATION_BACKEND=memory` y recrea el worker.
+Para volver al modo local, elimina esas variables o configura
+`TRAMA_COORDINATION_BACKEND=memory` y recrea ambos servicios.
 Detén el puente con `Ctrl+C`; al finalizar el uso, detén también el daemon de
 CCCC con `cccc daemon stop`.
 

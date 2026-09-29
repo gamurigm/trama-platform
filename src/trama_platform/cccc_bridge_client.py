@@ -57,7 +57,8 @@ class CcccBridgeCoordination(CoordinationPort):
     def submit_task(self, task: TaskEnvelope) -> str:
         started = perf_counter()
         logger.info(
-            "CCCC bridge task dispatch started",
+            "event=cccc_bridge_dispatch_started task_id=%s",
+            task.task_id,
             extra={"event": "cccc_bridge_dispatch_started", "task_id": task.task_id},
         )
         try:
@@ -68,25 +69,35 @@ class CcccBridgeCoordination(CoordinationPort):
             if not isinstance(tracking_id, str) or not tracking_id:
                 raise ValueError("CCCC bridge response did not include a tracking ID")
         except Exception as exc:
+            dispatch_duration_ms = round((perf_counter() - started) * 1000, 3)
             logger.warning(
-                "CCCC bridge task dispatch failed",
+                "event=cccc_bridge_dispatch_failed task_id=%s status=failed "
+                "dispatch_duration_ms=%.3f error_type=%s",
+                task.task_id,
+                dispatch_duration_ms,
+                type(exc).__name__,
                 extra={
                     "event": "cccc_bridge_dispatch_failed",
                     "task_id": task.task_id,
                     "status": "failed",
-                    "dispatch_duration_ms": round((perf_counter() - started) * 1000, 3),
+                    "dispatch_duration_ms": dispatch_duration_ms,
                     "error_type": type(exc).__name__,
                 },
             )
             raise
+        dispatch_duration_ms = round((perf_counter() - started) * 1000, 3)
         logger.info(
-            "CCCC bridge task dispatch completed",
+            "event=cccc_bridge_dispatch_completed task_id=%s tracking_id=%s "
+            "status=success dispatch_duration_ms=%.3f",
+            task.task_id,
+            tracking_id,
+            dispatch_duration_ms,
             extra={
                 "event": "cccc_bridge_dispatch_completed",
                 "task_id": task.task_id,
                 "tracking_id": tracking_id,
                 "status": "success",
-                "dispatch_duration_ms": round((perf_counter() - started) * 1000, 3),
+                "dispatch_duration_ms": dispatch_duration_ms,
             },
         )
         return tracking_id

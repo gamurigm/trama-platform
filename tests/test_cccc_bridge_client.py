@@ -112,10 +112,17 @@ def test_bridge_client_logs_task_id_and_duration_without_payload_or_token(caplog
         if record.name == "trama_platform.cccc_bridge_client"
     ]
     assert tracking_id == "cccc-track-1"
-    assert any(record.getMessage() == "CCCC bridge task dispatch started" for record in records)
-    completed = next(
-        record for record in records if record.getMessage() == "CCCC bridge task dispatch completed"
+    started = next(
+        record for record in records if "cccc_bridge_dispatch_started" in record.getMessage()
     )
+    assert "task_id=bridge-task-1" in started.getMessage()
+    completed = next(
+        record for record in records if "cccc_bridge_dispatch_completed" in record.getMessage()
+    )
+    assert "task_id=bridge-task-1" in completed.getMessage()
+    assert "tracking_id=cccc-track-1" in completed.getMessage()
+    assert "status=success" in completed.getMessage()
+    assert "dispatch_duration_ms=" in completed.getMessage()
     assert completed.task_id == "bridge-task-1"
     assert completed.tracking_id == "cccc-track-1"
     assert completed.status == "success"
@@ -140,8 +147,12 @@ def test_bridge_client_logs_failed_dispatch_duration(caplog):
         record
         for record in caplog.records
         if record.name == "trama_platform.cccc_bridge_client"
-        and record.getMessage() == "CCCC bridge task dispatch failed"
+        and "cccc_bridge_dispatch_failed" in record.getMessage()
     )
+    assert "task_id=bridge-task-1" in failed.getMessage()
+    assert "status=failed" in failed.getMessage()
+    assert "dispatch_duration_ms=" in failed.getMessage()
+    assert "error_type=HTTPStatusError" in failed.getMessage()
     assert failed.task_id == "bridge-task-1"
     assert failed.status == "failed"
     assert failed.dispatch_duration_ms >= 0
