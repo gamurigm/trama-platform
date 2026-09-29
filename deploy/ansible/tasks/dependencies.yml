@@ -1,0 +1,64 @@
+---
+- name: Register the official NATS Helm repository
+  ansible.builtin.command:
+    argv: [helm, repo, add, nats, https://nats-io.github.io/k8s/helm/charts/, --force-update]
+  changed_when: false
+
+- name: Update the Helm repository index
+  ansible.builtin.command:
+    argv: [helm, repo, update]
+  changed_when: false
+
+- name: Install or upgrade PostgreSQL
+  ansible.builtin.command:
+    argv:
+      - helm
+      - upgrade
+      - --install
+      - "{{ postgresql_release }}"
+      - "{{ postgresql_chart }}"
+      - --version
+      - "{{ postgresql_chart_version }}"
+      - --namespace
+      - "{{ kube_namespace }}"
+      - --values
+      - "{{ project_root }}/deploy/ansible/values/postgresql.yml"
+      - --wait
+      - --timeout
+      - 10m
+
+- name: Install or upgrade NATS with JetStream persistence
+  ansible.builtin.command:
+    argv:
+      - helm
+      - upgrade
+      - --install
+      - "{{ nats_release }}"
+      - "{{ nats_chart }}"
+      - --version
+      - "{{ nats_chart_version }}"
+      - --namespace
+      - "{{ kube_namespace }}"
+      - --values
+      - "{{ project_root }}/deploy/ansible/values/nats.yml"
+      - --wait
+      - --timeout
+      - 10m
+
+- name: Install or upgrade Redis in standalone ephemeral mode
+  ansible.builtin.command:
+    argv:
+      - helm
+      - upgrade
+      - --install
+      - "{{ redis_release }}"
+      - "{{ redis_chart }}"
+      - --version
+      - "{{ redis_chart_version }}"
+      - --namespace
+      - "{{ kube_namespace }}"
+      - --values
+      - "{{ project_root }}/deploy/ansible/values/redis.yml"
+      - --wait
+      - --timeout
+      - 10m

@@ -1,0 +1,66 @@
+---
+- name: Install or upgrade the TRAMA Helm release
+  ansible.builtin.command:
+    argv:
+      - helm
+      - upgrade
+      - --install
+      - "{{ gateway_release }}"
+      - "{{ project_root }}/deploy/helm/trama-gateway"
+      - --namespace
+      - "{{ kube_namespace }}"
+      - --values
+      - "{{ project_root }}/deploy/helm/trama-gateway/values-local.yaml"
+      - --wait
+      - --timeout
+      - 10m
+
+- name: Wait for TRAMA workloads to become ready
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - rollout
+      - status
+      - "deployment/{{ item }}"
+      - --namespace
+      - "{{ kube_namespace }}"
+      - --timeout=5m
+  loop:
+    - trama-gateway
+    - trama-gateway-outbox
+    - trama-gateway-python-api
+    - trama-gateway-python-worker
+  changed_when: false
+
+- name: Wait for persistent claims to bind
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - wait
+      - --for=jsonpath={.status.phase}=Bound
+      - pvc
+      - --all
+      - --namespace
+      - "{{ kube_namespace }}"
+      - --timeout=5m
+  changed_when: false
+
+- name: Read local PostgreSQL and JetStream PVCs
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - get
+      - pvc
+      - --namespace
+      - "{{ kube_namespace }}"
+      - -o
+      - wide
+  register: local_pvcs
+  changed_when: false
+
+- name: Confirm the persistent storage claims exist
+  ansible.builtin.assert:
+    that:
+      - "'trama-gateway-python-state' in local_pvcs.stdout"
+      - "'trama-postgresql' in local_pvcs.stdout"
+      - "'trama-nats' in local_pvcs.stdout"
