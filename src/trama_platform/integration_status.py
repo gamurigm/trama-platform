@@ -68,6 +68,17 @@ def check_integration(name: str, settings) -> dict:
                 False,
             )
         if name in {"cccc", "hermes"}:
+            if name == "cccc" and settings.coordination_backend == "cccc-bridge":
+                with httpx.Client(timeout=3, follow_redirects=False) as client:
+                    response = client.get(settings.cccc_bridge_url.rstrip("/") + "/healthz")
+                payload = response.json() if response.is_success else {}
+                healthy = response.is_success and payload.get("status") == "ok"
+                return state(
+                    "available" if healthy else "unreachable",
+                    "Puente CCCC responde; estado de CCCC y ejecución del modelo sin verificar"
+                    if healthy
+                    else f"Puente CCCC sin respuesta válida (HTTP {response.status_code})",
+                )
             executable = shutil.which(getattr(settings, name + "_executable"))
             if name == "hermes":
                 path = Path(settings.hermes_config_path).expanduser()

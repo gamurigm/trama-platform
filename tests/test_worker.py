@@ -34,6 +34,7 @@ def test_worker_builds_runtime_with_configured_coordination_and_lease(
     monkeypatch.setattr(worker, "build_coordination", lambda settings: configured_coordination)
 
     settings = TramaSettings(
+        coordination_backend="cccc-bridge",
         state_dir=str(tmp_path),
         task_lease_seconds=45,
         queue_capacity=7,
