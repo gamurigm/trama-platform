@@ -1,0 +1,21 @@
+---
+- name: Deploy TRAMA to the local Minikube profile
+  hosts: local
+  gather_facts: false
+  vars_files:
+    - vars/local.yml
+  tasks:
+    - name: Preflight local tools and cluster context
+      ansible.builtin.import_tasks: tasks/preflight.yml
+
+    - name: Build and load local container images
+      ansible.builtin.import_tasks: tasks/images.yml
+
+    - name: Apply encrypted application and database credentials
+      ansible.builtin.import_tasks: tasks/secrets.yml
+
+    - name: Deploy stateful dependencies
+      ansible.builtin.import_tasks: tasks/dependencies.yml
+
+    - name: Deploy TRAMA workloads
+      ansible.builtin.import_tasks: tasks/application.yml
