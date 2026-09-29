@@ -35,3 +35,5 @@ autoscaling:
 
 podDisruptionBudget:
   enabled: false
+
+fullnameOverride: trama-gateway
