@@ -53,6 +53,20 @@ pythonWorker:
       cpu: "2"
       memory: 2Gi
 
+pythonApi:
+  enabled: true
+  replicaCount: 1
+  service:
+    port: 8090
+  stateDir: /data/state
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
 secrets:
   existingSecret: trama-gateway-secrets
   databaseURLKey: database-url
@@ -62,6 +76,7 @@ secrets:
   oidcAudienceKey: oidc-audience
   serviceAccountTokenKey: service-account-token
   serviceAccountOrganizationKey: service-account-organization
+  pythonApiTokenKey: python-api-token
 
 auth:
   required: true

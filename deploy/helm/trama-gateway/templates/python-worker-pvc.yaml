@@ -5,7 +5,7 @@ metadata:
   name: {{ include "trama-gateway.fullname" . }}-python-state
   labels:
     {{- include "trama-gateway.labels" . | nindent 4 }}
-    app.kubernetes.io/component: python-worker
+    app.kubernetes.io/component: python-state
 spec:
   accessModes: [ReadWriteOnce]
   resources:

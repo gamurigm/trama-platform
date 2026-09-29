@@ -1,0 +1,70 @@
+{{- if .Values.pythonApi.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "trama-gateway.fullname" . }}-python-api
+  labels:
+    {{- include "trama-gateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: python-api
+spec:
+  replicas: {{ .Values.pythonApi.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "trama-gateway.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: python-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "trama-gateway.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: python-api
+    spec:
+      containers:
+        - name: python-api
+          image: "{{ .Values.pythonWorker.image.repository }}:{{ .Values.pythonWorker.image.tag }}"
+          imagePullPolicy: {{ .Values.pythonWorker.image.pullPolicy }}
+          command: ["trama", "api"]
+          ports:
+            - name: http
+              containerPort: 8090
+              protocol: TCP
+          env:
+            - name: TRAMA_ENV
+              value: prod
+            - name: TRAMA_API_HOST
+              value: 0.0.0.0
+            - name: TRAMA_API_PORT
+              value: {{ .Values.pythonApi.service.port | quote }}
+            - name: TRAMA_STATE_DIR
+              value: {{ .Values.pythonApi.stateDir | quote }}
+            - name: TRAMA_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: {{ .Values.secrets.pythonApiTokenKey }}
+            - name: TRAMA_NATS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: {{ .Values.secrets.natsURLKey }}
+          readinessProbe:
+            tcpSocket:
+              port: http
+          livenessProbe:
+            tcpSocket:
+              port: http
+          volumeMounts:
+            - name: state
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.pythonApi.resources | nindent 12 }}
+      volumes:
+        - name: state
+          {{- if .Values.pythonWorker.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "trama-gateway.fullname" . }}-python-state
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- end }}

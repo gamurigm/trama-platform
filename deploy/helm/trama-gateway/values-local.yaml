@@ -1,0 +1,33 @@
+gateway:
+  replicaCount: 1
+  image:
+    repository: trama-gateway
+    tag: local
+    pullPolicy: Never
+
+outbox:
+  replicaCount: 1
+  image:
+    repository: trama-outbox
+    tag: local
+    pullPolicy: Never
+
+pythonWorker:
+  replicaCount: 1
+  image:
+    repository: trama-python
+    tag: local
+    pullPolicy: Never
+  persistence:
+    enabled: true
+    size: 5Gi
+
+pythonApi:
+  enabled: true
+  replicaCount: 1
+
+autoscaling:
+  enabled: false
+
+podDisruptionBudget:
+  enabled: false
