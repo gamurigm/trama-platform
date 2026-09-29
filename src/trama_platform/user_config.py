@@ -55,8 +55,12 @@ class UserConfigStore:
                     raise ValueError(f"{name}: se requiere un entero positivo")
             elif not isinstance(value, str) or not value.strip() or len(value) > 2000:
                 raise ValueError(f"{name}: texto no válido")
-            if name == "coordination_backend" and value not in {"memory", "cccc"}:
-                raise ValueError("Coordinador: selecciona memory o cccc")
+            if name == "coordination_backend" and value not in {
+                "memory",
+                "cccc",
+                "cccc-bridge",
+            }:
+                raise ValueError("Coordinador: selecciona memory, cccc o cccc-bridge")
             if name.endswith("_url"):
                 try:
                     parsed = urlsplit(value)

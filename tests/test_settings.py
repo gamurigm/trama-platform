@@ -45,6 +45,42 @@ def test_settings_loads_only_required_memory_integration_vars(monkeypatch):
     assert not hasattr(settings, "external_token")
 
 
+def test_cccc_bridge_backend_settings_validate_url_and_token(monkeypatch, tmp_path):
+    from trama_platform.user_config import UserConfigStore
+
+    monkeypatch.setenv("TRAMA_COORDINATION_BACKEND", "cccc-bridge")
+    monkeypatch.setenv("TRAMA_CCCC_BRIDGE_URL", "http://host.docker.internal:8091")
+    monkeypatch.setenv("TRAMA_CCCC_BRIDGE_TOKEN", "bridge-test-token")
+
+    settings = TramaSettings.from_env(
+        store=UserConfigStore(tmp_path / "config.json"),
+        vault=type("Vault", (), {"get": lambda self, name: None})(),
+    )
+
+    assert settings.coordination_backend == "cccc-bridge"
+    assert getattr(settings, "cccc_bridge_url", None) == "http://host.docker.internal:8091"
+    assert getattr(settings, "cccc_bridge_token", None) == "bridge-test-token"
+
+
+def test_cccc_bridge_actor_allowlist_is_parsed(monkeypatch):
+    monkeypatch.setenv(
+        "TRAMA_CCCC_ALLOWED_ACTORS", " agent-foreman, agent-backend-api ,, "
+    )
+
+    settings = TramaSettings.from_env()
+
+    assert getattr(settings, "allowed_cccc_actors", None) == frozenset(
+        {"agent-foreman", "agent-backend-api"}
+    )
+
+
+def test_cccc_bridge_settings_reject_url_credentials():
+    import pytest
+
+    with pytest.raises(ValueError, match="TRAMA_CCCC_BRIDGE_URL"):
+        TramaSettings(cccc_bridge_url="http://user:password@host.docker.internal:8091")
+
+
 def test_settings_loads_optional_colibri_profile(monkeypatch):
     monkeypatch.setenv("TRAMA_COLIBRI_URL", "http://127.0.0.1:8000")
     monkeypatch.setenv("TRAMA_COLIBRI_MODEL", "glm-local")

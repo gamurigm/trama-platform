@@ -2,7 +2,9 @@
 
 import os
 
-SECRET_NAMES = frozenset({"api_token", "gateway_token", "utopia_token"})
+SECRET_NAMES = frozenset(
+    {"api_token", "gateway_token", "utopia_token", "cccc_bridge_token"}
+)
 
 
 class CredentialStore:
