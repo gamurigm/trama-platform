@@ -21,7 +21,7 @@ class Vault:
         return bool(self.get(name))
 
     def set(self, name, value):
-        if name not in {"api_token", "gateway_token", "utopia_token"}:
+        if name not in {"api_token", "gateway_token", "utopia_token", "cccc_bridge_token"}:
             raise ValueError("Nombre de credencial no permitido")
         self.values[name] = value
 
@@ -39,6 +39,7 @@ def stores(tmp_path, monkeypatch):
         "TRAMA_API_TOKEN",
         "TRAMA_GATEWAY_TOKEN",
         "TRAMA_UTOPIA_TOKEN",
+        "TRAMA_CCCC_BRIDGE_TOKEN",
     ):
         monkeypatch.delenv(name, raising=False)
     return store, vault
@@ -78,6 +79,29 @@ def test_rejected_settings_do_not_create_file(stores, values):
     with pytest.raises(ValueError):
         store.update(values)
     assert not store.path.exists()
+
+
+def test_user_config_accepts_cccc_bridge_backend_and_url(stores):
+    store, _ = stores
+
+    values = {
+        "coordination_backend": "cccc-bridge",
+        "cccc_bridge_url": "http://host.docker.internal:8091",
+    }
+
+    assert store.validate(values) == values
+
+
+def test_cccc_bridge_token_is_redacted(stores):
+    store, vault = stores
+    sentinel = "CCCC-BRIDGE-SECRET-4518"
+    vault.set("cccc_bridge_token", sentinel)
+
+    snapshot = config_snapshot(TramaSettings(), store, vault)
+
+    assert sentinel not in repr(snapshot)
+    secret = next(item for item in snapshot["secrets"] if item["name"] == "cccc_bridge_token")
+    assert secret["configured"] is True
 
 
 def test_secret_write_read_clear_and_validation_never_echo_value(stores):

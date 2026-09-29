@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 
 def _read_int(name: str, default: int) -> int:
@@ -84,6 +84,13 @@ class TramaSettings:
     coordination_backend: str = "memory"
     cccc_executable: str = "cccc"
     cccc_timeout_seconds: int = 30
+    cccc_bridge_url: str = "http://host.docker.internal:8091"
+    cccc_bridge_token: str | None = None
+    cccc_bridge_timeout_seconds: int = 35
+    cccc_bridge_host: str = "127.0.0.1"
+    cccc_bridge_port: int = 8091
+    cccc_allowed_actors: str = ""
+    cccc_result_recipient: str = "foreman"
     queue_capacity: int = 100
     max_concurrency: int = 4
     dispatch_timeout_seconds: int = 900
@@ -108,6 +115,33 @@ class TramaSettings:
     semantica_enabled: bool = False
     semantica_executable: str = "semantica-mcp"
     utopia_mcp_url: str = ""
+
+    def __post_init__(self) -> None:
+        if self.coordination_backend not in {"memory", "cccc", "cccc-bridge"}:
+            raise ValueError(
+                "TRAMA_COORDINATION_BACKEND debe ser 'memory', 'cccc' o 'cccc-bridge'"
+            )
+        try:
+            bridge_url = urlsplit(self.cccc_bridge_url)
+            _ = bridge_url.port
+        except ValueError:
+            bridge_url = None
+        if (
+            bridge_url is None
+            or bridge_url.scheme not in {"http", "https"}
+            or not bridge_url.hostname
+            or bridge_url.username
+            or bridge_url.password
+            or bridge_url.query
+            or bridge_url.fragment
+        ):
+            raise ValueError("TRAMA_CCCC_BRIDGE_URL debe ser una URL HTTP(S) sin credenciales")
+
+    @property
+    def allowed_cccc_actors(self) -> frozenset[str]:
+        return frozenset(
+            actor.strip() for actor in self.cccc_allowed_actors.split(",") if actor.strip()
+        )
 
     @property
     def state_path(self) -> Path:
