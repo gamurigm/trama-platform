@@ -1,0 +1,37 @@
+gateway:
+  replicaCount: 1
+  image:
+    repository: trama-gateway
+    tag: local
+    pullPolicy: Never
+
+outbox:
+  replicaCount: 1
+  natsStreamReplicas: 1
+  image:
+    repository: trama-outbox
+    tag: local
+    pullPolicy: Never
+
+controlPlane:
+  replicaCount: 1
+  image:
+    repository: trama-python
+    tag: local
+    pullPolicy: Never
+
+pythonWorker:
+  replicaCount: 1
+  image:
+    repository: trama-python
+    tag: local
+    pullPolicy: Never
+
+auth:
+  required: true
+
+autoscaling:
+  enabled: false
+
+podDisruptionBudget:
+  enabled: false
