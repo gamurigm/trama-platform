@@ -101,6 +101,42 @@ def test_coordination_factory_builds_cccc_adapter():
     assert adapter.timeout_seconds == 17
 
 
+def test_cli_starts_cccc_bridge(monkeypatch):
+    cli = importlib.import_module("trama_platform.cli")
+    config = cli.TramaSettings(
+        cccc_bridge_token="bridge-test-token",
+        cccc_bridge_host="127.0.0.1",
+        cccc_bridge_port=8091,
+    )
+    started = []
+
+    monkeypatch.setattr(cli.TramaSettings, "from_env", classmethod(lambda cls: config))
+    monkeypatch.setattr(
+        cli,
+        "run_cccc_bridge",
+        lambda settings, host, port: started.append((settings, host, port)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["trama", "cccc-bridge", "--host", "127.0.0.1", "--port", "8091"],
+    )
+
+    cli.main()
+
+    assert started == [(config, "127.0.0.1", 8091)]
+
+
+def test_cccc_bridge_refuses_unspecified_bind_address():
+    cli = importlib.import_module("trama_platform.cli")
+    run_bridge = getattr(cli, "run_cccc_bridge", None)
+    assert run_bridge is not None, "CCCC bridge runner is missing"
+
+    with pytest.raises(ValueError, match="loopback or private interface"):
+        run_bridge(cli.TramaSettings(cccc_bridge_token="bridge-test-token"), "0.0.0.0", 8091)
+
+
 def test_external_factories_require_complete_utopia_configuration():
     cli = importlib.import_module("trama_platform.cli")
     settings = cli.TramaSettings(

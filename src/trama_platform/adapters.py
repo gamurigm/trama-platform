@@ -37,6 +37,8 @@ class CcccCliAdapter(CoordinationPort):
                 task.actor,
                 "--title",
                 task.task_id,
+                "--idempotency-key",
+                task.task_id,
                 "--outcome",
                 "Devolver AgentResult con pruebas y evidencia",
             ]
