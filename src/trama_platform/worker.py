@@ -35,7 +35,12 @@ async def serve_task_worker(
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     owns_runtime = runtime is None
+    if runtime is None:
+        # Import lazily because the CLI also exposes this worker entry point.
+        from .cli import build_coordination
+
     runtime_instance = runtime or TramaRuntime(
+        coordination=build_coordination(settings),
         state_store=SqliteStateStore(settings.state_path),
         queue_capacity=settings.queue_capacity,
         max_concurrency=settings.max_concurrency,

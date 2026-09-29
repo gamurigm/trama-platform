@@ -123,6 +123,8 @@ class TramaRuntime:
         self._events: list[OperationEvent] = []
         self._logs: list[TaskLog] = []
         self._task_lock = RLock()
+        self._close_lock = RLock()
+        self._closed = False
 
         if self.state_store is not None:
             self.projects.projects.update(
@@ -1174,4 +1176,13 @@ class TramaRuntime:
         return self.dispatcher.wait_for_idle(timeout)
 
     def close(self) -> None:
-        self.dispatcher.close()
+        with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+        try:
+            self.dispatcher.close()
+        finally:
+            close_coordination = getattr(self.coordination, "close", None)
+            if callable(close_coordination):
+                close_coordination()

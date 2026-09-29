@@ -13,6 +13,7 @@ import httpx
 
 from .adapters import CcccCliAdapter
 from .api import create_app
+from .cccc_bridge_client import CcccBridgeCoordination
 from .contracts import (
     AgentResult,
     MemoryCandidate,
@@ -91,6 +92,12 @@ def build_coordination(settings: TramaSettings) -> CoordinationPort | None:
         return CcccCliAdapter(
             executable=settings.cccc_executable,
             timeout_seconds=settings.cccc_timeout_seconds,
+        )
+    if backend == "cccc-bridge":
+        return CcccBridgeCoordination(
+            base_url=settings.cccc_bridge_url,
+            token=settings.cccc_bridge_token or "",
+            timeout_seconds=settings.cccc_bridge_timeout_seconds,
         )
     raise ValueError(
         "TRAMA_COORDINATION_BACKEND debe ser 'memory', 'cccc' o 'cccc-bridge'"

@@ -101,6 +101,29 @@ def test_coordination_factory_builds_cccc_adapter():
     assert adapter.timeout_seconds == 17
 
 
+def test_build_coordination_selects_bridge_backend():
+    cli = importlib.import_module("trama_platform.cli")
+    settings = cli.TramaSettings(
+        coordination_backend="cccc-bridge",
+        cccc_bridge_url="http://bridge.test:8091",
+        cccc_bridge_token="bridge-test-token",
+        cccc_bridge_timeout_seconds=19,
+    )
+
+    adapter = cli.build_coordination(settings)
+
+    assert type(adapter).__name__ == "CcccBridgeCoordination"
+    assert adapter.base_url == "http://bridge.test:8091"
+    assert adapter.timeout_seconds == 19
+    adapter.close()
+
+
+def test_memory_backend_remains_default():
+    cli = importlib.import_module("trama_platform.cli")
+
+    assert cli.build_coordination(cli.TramaSettings()) is None
+
+
 def test_cli_starts_cccc_bridge(monkeypatch):
     cli = importlib.import_module("trama_platform.cli")
     config = cli.TramaSettings(

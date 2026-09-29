@@ -47,6 +47,8 @@ class CcccBridgeCoordination(CoordinationPort):
             headers={"Authorization": f"Bearer {token}"},
             transport=transport,
         )
+        self.base_url = base_url.rstrip("/")
+        self.timeout_seconds = timeout_seconds
 
     def submit_task(self, task: TaskEnvelope) -> str:
         response = self._client.post("/v1/tasks", json=task.model_dump(mode="json"))

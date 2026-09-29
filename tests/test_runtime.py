@@ -1,8 +1,10 @@
 from pathlib import Path
 from threading import Event, Lock
 
+import httpx
 import pytest
 
+from trama_platform.cccc_bridge_client import CcccBridgeCoordination
 from trama_platform.contracts import (
     AgentResult,
     Evidence,
@@ -82,6 +84,42 @@ def runtime_with_blocking_coordination(
         max_concurrency=max_concurrency,
     )
     return runtime, coordination
+
+
+def test_unreachable_bridge_marks_dispatch_failed():
+    bridge = CcccBridgeCoordination(
+        "http://bridge.test",
+        "bridge-test-token",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(503, json={"detail": "unavailable"})
+        ),
+    )
+    runtime = TramaRuntime(coordination=bridge, max_concurrency=1)
+    runtime.register_project(scoped_manifest())
+
+    runtime.submit_task(task("bridge-unreachable"))
+
+    assert runtime.wait_for_idle(timeout=3)
+    assert runtime.tasks["bridge-unreachable"].state == "failed"
+    runtime.close()
+
+
+def test_runtime_close_closes_coordination_once():
+    class ClosableCoordination(RecordingCoordination):
+        def __init__(self):
+            super().__init__()
+            self.close_calls = 0
+
+        def close(self):
+            self.close_calls += 1
+
+    coordination = ClosableCoordination()
+    runtime = TramaRuntime(coordination=coordination)
+
+    runtime.close()
+    runtime.close()
+
+    assert coordination.close_calls == 1
 
 
 def test_runtime_keeps_projects_and_tasks_in_their_contract_boundary():
