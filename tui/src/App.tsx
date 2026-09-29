@@ -1,265 +1,163 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
-import { StatusBar } from "./components/StatusBar";
-import type { DashboardData } from "./api/types";
-import type { ScreenData, TaskAction } from "./api/types";
+import type { DashboardData, Project } from "./api/types";
 import type { TramaApiClient } from "./api/client";
-import { initialNavigation, reduceNavigation } from "./navigation/reducer";
-import type { ScreenId } from "./navigation/model";
-import { DashboardScreen } from "./screens/DashboardScreen";
-import { NavigationRail, screenIds, screenTitles } from "./screens/NavigationRail";
-import { CommandPalette, type PaletteCommand } from "./ui/CommandPalette";
-import { KeyHints } from "./ui/KeyHints";
-import { colors } from "./ui/tokens";
-import { ProjectsScreen } from "./screens/ProjectsScreen";
-import { TasksScreen } from "./screens/TasksScreen";
-import { AgentsScreen } from "./screens/AgentsScreen";
-import { QueuesScreen } from "./screens/QueuesScreen";
-import { WorkersScreen } from "./screens/WorkersScreen";
-import { EventsScreen } from "./screens/EventsScreen";
-import { MemoryScreen } from "./screens/MemoryScreen";
-import { HealthScreen } from "./screens/HealthScreen";
-import { ConfirmDialog } from "./ui/ConfirmDialog";
-import { ProjectPicker } from "./ui/ProjectPicker";
-import { DetailScreen } from "./screens/DetailScreen";
-import type { TimelineEntry } from "./api/types";
+import { ConsoleContext } from "./console";
+import type { FormSpec } from "./console";
+import { clean, statusColor, statusLabel, theme } from "./theme";
+import { Action, Hint, Panel } from "./components/Primitives";
+import { FormFields } from "./components/FormFields";
+import { ProjectsView } from "./components/ProjectsView";
+import { PlanningView } from "./components/PlanningView";
+import { TasksView } from "./components/TasksView";
+import { ObservabilityView } from "./components/ObservabilityView";
+import { IntegrationsView } from "./components/IntegrationsView";
+import { detectedRepository, findDetectedProject } from "./repository";
 
-type AppState =
-  | { status: "loading" }
-  | { status: "ready"; data: DashboardData; staleSince?: number; error?: Error }
-  | { status: "error"; error: Error };
+const views = ["Resumen", "Proyectos", "Planificación", "Tareas", "Actividad", "Integraciones"];
 
-type PendingAction = { taskId: string; action: TaskAction };
-type DetailState = { kind: string; id: string; timeline: TimelineEntry[]; loading: boolean; error?: string };
-
-export function App({ client, pollMs = 2000 }: { client: TramaApiClient; pollMs?: number }) {
+export function App({ client, pollMs = 5000 }: { client: TramaApiClient; pollMs?: number }) {
   const renderer = useRenderer();
   const { width } = useTerminalDimensions();
-  const [state, setState] = useState<AppState>({ status: "loading" });
-  const [screenData, setScreenData] = useState<ScreenData>({});
-  const [pendingAction, setPendingAction] = useState<PendingAction>();
-  const [detail, setDetail] = useState<DetailState>();
-  const [navigation, setNavigation] = useState(initialNavigation);
-  const navigationRef = useRef(navigation);
-  navigationRef.current = navigation;
-  const requestInFlight = useRef(false);
-
-  const refresh = useCallback(async () => {
-    if (requestInFlight.current) return;
-    requestInFlight.current = true;
-    try {
-      const data = await client.getDashboard(navigation.projectId);
-      setState({ status: "ready", data });
-    } catch (error) {
-      const normalizedError = error instanceof Error ? error : new Error(String(error));
-      setState((current) => current.status === "ready"
-        ? { ...current, staleSince: Date.now(), error: normalizedError }
-        : { status: "error", error: normalizedError });
-    } finally {
-      requestInFlight.current = false;
-    }
-  }, [client, navigation.projectId]);
-
-  const requestTaskAction = useCallback((action: TaskAction, explicitTaskId?: string) => {
-    if (navigation.screen !== "tasks" || navigation.overlay !== "none") return;
-    const taskId = explicitTaskId ?? navigation.selectedId ?? (state.status === "ready" ? state.data.tasks[0]?.task_id : undefined);
-    if (!taskId) return;
-    setPendingAction({ taskId, action });
-    setNavigation((current) => reduceNavigation(current, { type: "open-overlay", overlay: "confirm" }));
-  }, [navigation.overlay, navigation.screen, navigation.selectedId, state]);
-
-  const executeTaskAction = useCallback(async () => {
-    if (!pendingAction) return;
-    try {
-      if (pendingAction.action === "approve") await client.approveTask(pendingAction.taskId);
-      if (pendingAction.action === "cancel") await client.cancelTask(pendingAction.taskId);
-      if (pendingAction.action === "retry") await client.retryTask(pendingAction.taskId);
-      setNavigation((current) => reduceNavigation(current, {
-        type: "set-notice",
-        notice: { kind: "success", message: `${pendingAction.action} enviado para ${pendingAction.taskId}` },
-      }));
-      setNavigation((current) => reduceNavigation(current, { type: "close-overlay" }));
-      setPendingAction(undefined);
-      void refresh();
-    } catch (error) {
-      setNavigation((current) => reduceNavigation(current, {
-        type: "set-notice",
-        notice: { kind: "error", message: error instanceof Error ? error.message : String(error) },
-      }));
-      setNavigation((current) => reduceNavigation(current, { type: "close-overlay" }));
-      setPendingAction(undefined);
-    }
-  }, [client, pendingAction, refresh]);
-
+  const [view, setView] = useState(0);
+  const [version, setVersion] = useState(0);
+  const [project, setProject] = useState<Project>();
+  const [data, setData] = useState<DashboardData>();
+  const [loadError, setLoadError] = useState("");
+  const [form, setForm] = useState<FormSpec>();
+  const [detail, setDetail] = useState<{title: string; rows: string[]}>();
+  const [notice, setNotice] = useState<{message: string; error?: boolean}>();
+  const [busy, setBusy] = useState(false);
+  const inFlight = useRef(false);
+  const operation = useRef(false);
+  const locked = Boolean(form || detail || busy);
+  const refreshDashboard = useCallback(async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try { setData(await client.getDashboard()); setLoadError(""); }
+    catch (error) { setLoadError(error instanceof Error ? error.message : "No se pudo conectar"); }
+    finally { inFlight.current = false; }
+  }, [client]);
+  const refresh = () => { setVersion((v) => v + 1); void refreshDashboard(); };
   useEffect(() => {
-    if (navigation.overlay !== "none") return;
-    void refresh();
-    const interval = setInterval(() => void refresh(), pollMs);
-    return () => clearInterval(interval);
-  }, [navigation.overlay, pollMs, refresh]);
-
+    void refreshDashboard();
+    const timer = setInterval(() => void refreshDashboard(), pollMs);
+    return () => clearInterval(timer);
+  }, [refreshDashboard, pollMs]);
   useEffect(() => {
-    if (navigation.screen === "dashboard") return;
-    let cancelled = false;
-    const load = async () => {
-      try {
-        if (navigation.screen === "projects") {
-          const projects = await client.listProjects();
-          if (!cancelled) setScreenData((current) => ({ ...current, projects }));
-        } else if (navigation.screen === "agents") {
-          const agents = await client.listAgents();
-          if (!cancelled) setScreenData((current) => ({ ...current, agents }));
-        } else if (navigation.screen === "events") {
-          const events = await client.listEvents();
-          if (!cancelled) setScreenData((current) => ({ ...current, events }));
-        } else if (navigation.screen === "memory") {
-          if (!navigation.projectId) return;
-          const projects = await client.listProjects();
-          const project = projects.find((item) => item.project_id === navigation.projectId);
-          if (project) {
-            const memory = await client.listMemoryCandidates(project.organization_id ?? "default", project.project_id);
-            if (!cancelled) setScreenData((current) => ({ ...current, memory, projects }));
-          }
-        } else if (navigation.screen === "health") {
-          const health = await client.getHealth();
-          if (!cancelled) setScreenData((current) => ({ ...current, health }));
-        }
-      } catch (error) {
-        if (!cancelled) setScreenData((current) => ({ ...current, logs: [{ message: error instanceof Error ? error.message : String(error), project_id: navigation.projectId ?? "", correlation_id: "screen-load" }] }));
-      }
-    };
-    void load();
-    return () => { cancelled = true; };
-  }, [client, navigation.projectId, navigation.screen]);
-
-  useEffect(() => {
-    if (navigation.overlay !== "project-picker" || screenData.projects) return;
-    void client.listProjects().then((projects) => setScreenData((current) => ({ ...current, projects }))).catch(() => undefined);
-  }, [client, navigation.overlay, screenData.projects]);
-
+    if (!detectedRepository.root) return;
+    let alive = true;
+    void client.getProjects().then((projects) => {
+      const match = findDetectedProject(projects);
+      if (alive && match) setProject(match);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [client]);
+  useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(undefined), 12000); return () => clearTimeout(timer); }, [notice]);
+  const run = async (fn: () => Promise<unknown>, success: string) => {
+    if (operation.current) return;
+    operation.current = true; setBusy(true);
+    try { await fn(); setNotice({ message: success }); refresh(); }
+    catch (error) { setNotice({ message: error instanceof Error ? error.message : "No se pudo completar", error: true }); }
+    finally { operation.current = false; setBusy(false); }
+  };
+  const activateProject = useCallback((value: Project) => {
+    setProject(value);
+    setNotice({ message: `Proyecto activo: ${value.project_id}` });
+  }, []);
   useKeyboard((key) => {
-    const name = String(key.name);
-    const sequence = String(key.sequence);
-    const normalizedName = name.toLowerCase();
-    const input = normalizedName === "slash" || sequence === "/" ? "/" : name;
-    if (navigation.overlay !== "none") {
-      if (normalizedName === "escape" || normalizedName === "esc") {
-        setNavigation((current) => reduceNavigation(current, { type: "close-overlay" }));
-      }
-      return;
-    }
-    if (detail) {
-      if (normalizedName === "escape" || normalizedName === "esc") setDetail(undefined);
-      return;
-    }
-    if (normalizedName === "r") void refresh();
-    if (normalizedName === "q") renderer.destroy();
-    if ((normalizedName === "enter" || normalizedName === "return") && navigation.screen === "tasks") {
-      const currentNavigation = navigationRef.current;
-      const tasks = state.status === "ready"
-        ? state.data.tasks.filter((task) => !currentNavigation.projectId || !task.project_id || task.project_id === currentNavigation.projectId)
-        : [];
-      const taskId = currentNavigation.selectedId ?? tasks[currentNavigation.selectedIndex]?.task_id;
-      if (taskId) {
-        setDetail({ kind: "Task", id: taskId, timeline: [], loading: true });
-        void client.getTaskTimeline(taskId).then((timeline) => {
-          setDetail({ kind: "Task", id: taskId, timeline, loading: false });
-        }).catch((error) => {
-          setDetail({ kind: "Task", id: taskId, timeline: [], loading: false, error: error instanceof Error ? error.message : String(error) });
-        });
-      }
-      return;
-    }
-    if (normalizedName === "down" || normalizedName === "arrowdown" || normalizedName === "j" || normalizedName === "up" || normalizedName === "arrowup" || normalizedName === "k") {
-      const direction = normalizedName === "up" || normalizedName === "arrowup" || normalizedName === "k" ? -1 : 1;
-      setNavigation((current) => {
-        if (current.screen === "tasks") {
-          const tasks = state.status === "ready"
-            ? state.data.tasks.filter((task) => !task.project_id || !current.projectId || task.project_id === current.projectId)
-            : [];
-          if (tasks.length > 0) {
-            const atBoundary = direction < 0 ? current.selectedIndex === 0 : current.selectedIndex === tasks.length - 1;
-            if (atBoundary) {
-              const currentIndex = screenIds.indexOf(current.screen);
-              const nextScreen = screenIds[(currentIndex + direction + screenIds.length) % screenIds.length] ?? "dashboard";
-              return reduceNavigation(current, { type: "open-screen", screen: nextScreen });
-            }
-            const nextIndex = (current.selectedIndex + direction + tasks.length) % tasks.length;
-            return reduceNavigation(current, { type: "select-id", id: tasks[nextIndex]?.task_id, index: nextIndex });
-          }
-        }
-        const currentIndex = screenIds.indexOf(current.screen);
-        const nextScreen = screenIds[(currentIndex + direction + screenIds.length) % screenIds.length] ?? "dashboard";
-        return reduceNavigation(current, { type: "open-screen", screen: nextScreen });
-      });
-      return;
-    }
-    if (normalizedName === "a" || normalizedName === "x" || normalizedName === "y") {
-      requestTaskAction(normalizedName === "a" ? "approve" : normalizedName === "x" ? "cancel" : "retry");
-    }
-    if (input === "/" || input === "?" || normalizedName === "p") {
-      setNavigation((current) => {
-        const next = reduceNavigation(current, { type: "key", key: input === "/" ? "/" : name, itemCount: 0 });
-        return next;
-      });
-    }
+    if (form) return;
+    if (detail) { if (key.name === "escape") { key.preventDefault(); setDetail(undefined); } return; }
+    if (busy) return;
+    if (/^[1-6]$/.test(key.name)) { key.preventDefault(); setView(+key.name - 1); }
+    if (key.name === "r") refresh();
+    if (key.name === "q") renderer.destroy();
   });
-
-  if (state.status === "loading") {
-    return <box flexGrow={1} alignItems="center" justifyContent="center"><text>Conectando...</text></box>;
-  }
-
-  if (state.status === "error") {
-    return <box flexGrow={1} alignItems="center" justifyContent="center"><text>API no disponible: {state.error.message}</text></box>;
-  }
-
-  const stacked = width < 60;
-  const commands: PaletteCommand[] = [
-    ...screenIds.map((screen) => ({ id: screen, label: screenTitles[screen], screen })),
-    { id: "refresh", label: "Actualizar" },
-    { id: "project", label: "Cambiar proyecto" },
-    { id: "help", label: "Ayuda" },
-    { id: "quit", label: "Salir" },
-  ];
-  const screen = navigation.screen;
-  const routedData: ScreenData = { ...screenData, tasks: state.data.tasks, agents: state.data.agents, status: state.data.status };
-
-  const operationalScreen = screen === "projects" ? <ProjectsScreen projectId={navigation.projectId} data={routedData} selectedId={navigation.selectedId} />
-    : screen === "tasks" ? <TasksScreen projectId={navigation.projectId} data={routedData} selectedId={navigation.selectedId} onAction={(taskId, action) => { setNavigation((current) => reduceNavigation(current, { type: "select-id", id: taskId, index: 0 })); requestTaskAction(action, taskId); }} />
-      : screen === "agents" ? <AgentsScreen projectId={navigation.projectId} data={routedData} selectedId={navigation.selectedId} />
-        : screen === "queues" ? <QueuesScreen projectId={navigation.projectId} data={routedData} />
-          : screen === "workers" ? <WorkersScreen projectId={navigation.projectId} data={routedData} />
-            : screen === "events" ? <EventsScreen projectId={navigation.projectId} data={routedData} selectedId={navigation.selectedId} />
-              : screen === "memory" ? <MemoryScreen projectId={navigation.projectId} data={routedData} selectedId={navigation.selectedId} />
-                : <HealthScreen projectId={navigation.projectId} data={routedData} />;
-
-  return (
-    <box flexDirection="column" width="100%" height="100%">
-      <box border borderStyle="single" paddingLeft={1} paddingRight={1}>
-        <text><strong fg={colors.focus}>TRAMA</strong>{"  ·  "}{screenTitles[screen]}{"  ·  "}<span fg={colors.focus}>API ●</span></text>
+  return <ConsoleContext.Provider value={{ client, version, locked, project, setProject: activateProject,
+    form: (spec) => { if (!operation.current) setForm(spec); }, inspect: (title, rows) => setDetail({ title, rows }), run, refresh }}>
+    <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.bg} paddingX={1}>
+      <box flexDirection="row" justifyContent="space-between" paddingY={0} flexShrink={0}>
+        <text fg={theme.text}><b><span fg={theme.cyan}>▰ </span>TRAMA</b><span fg={theme.muted}>{width >= 70 ? "  /  CENTRO DE OPERACIONES" : ""}</span></text>
+        <text fg={loadError ? theme.coral : data ? theme.green : theme.amber}>{loadError ? "● Sin conexión" : data ? "● API activa" : "◌ Conectando..."}</text>
       </box>
-      <StatusBar status={state.data.status} />
-      {"staleSince" in state && state.staleSince ? <text fg={colors.attention}>{`Datos obsoletos · ${state.error?.message ?? "actualiza con r"}`}</text> : null}
-      <box flexDirection={stacked ? "column" : "row"} flexGrow={1}>
-        <NavigationRail screen={screen} compact={stacked} onChoose={(nextScreen: ScreenId) => setNavigation((current) => reduceNavigation(current, { type: "open-screen", screen: nextScreen }))} />
-        {detail ? (
-          <DetailScreen kind={detail.kind} id={detail.id} projectId={navigation.projectId} timeline={detail.timeline} loading={detail.loading} error={detail.error} />
-        ) : screen === "dashboard" ? (
-          <DashboardScreen data={state.data} stacked={stacked} />
-        ) : (
-          operationalScreen
-        )}
+      <box flexDirection="row" columnGap={1} rowGap={0} flexWrap="wrap" flexShrink={0}>
+        {views.map((label, i) => <box key={label} paddingX={1} backgroundColor={view === i ? theme.selected : theme.bg}
+          onMouseDown={() => { if (!locked) setView(i); }}>
+          <text fg={view === i ? theme.violet : theme.muted}>{i + 1} {width < 100 && i === 2 ? "Planes" : width < 100 && i === 5 ? "Conexiones" : label}</text>
+        </box>)}
       </box>
-      <box border borderStyle="single" paddingLeft={1} paddingRight={1}>
-        <KeyHints items={stacked
-          ? [{ key: "j/k", label: "mover" }, { key: "/", label: "comandos" }, { key: "r", label: "actualizar" }, { key: "q", label: "salir" }]
-          : [{ key: "↑↓/jk", label: "navegar" }, { key: "Enter", label: "abrir" }, { key: "/", label: "comandos" }, { key: "r", label: "actualizar" }, { key: "q", label: "salir" }]}
-        />
+      <box marginTop={1} marginBottom={1} flexDirection="row" justifyContent="space-between" flexShrink={0}>
+        <text fg={theme.violet}>{views[view]} <span fg={theme.muted}>/ {clean(project?.project_id ?? "Todos los proyectos")}</span></text>
+        {busy && <text fg={theme.cyan}>◌ Procesando…</text>}
       </box>
-      {navigation.overlay === "palette" ? <CommandPalette commands={commands} onChoose={(command) => command.screen && setNavigation((current) => reduceNavigation(current, { type: "open-screen", screen: command.screen as ScreenId }))} onClose={() => setNavigation((current) => reduceNavigation(current, { type: "close-overlay" }))} /> : null}
-      {navigation.overlay === "project-picker" ? <ProjectPicker projects={screenData.projects ?? []} onChoose={(project) => { setNavigation((current) => reduceNavigation(current, { type: "set-project", projectId: project.project_id })); setNavigation((current) => reduceNavigation(current, { type: "close-overlay" })); }} onClose={() => setNavigation((current) => reduceNavigation(current, { type: "close-overlay" }))} /> : null}
-      {navigation.overlay === "confirm" && pendingAction ? <ConfirmDialog action={pendingAction.action} target={pendingAction.taskId} consequence="La operación se enviará a la API y puede cambiar el estado de la tarea." onConfirm={() => void executeTaskAction()} onCancel={() => { setPendingAction(undefined); setNavigation((current) => reduceNavigation(current, { type: "close-overlay" })); }} /> : null}
-      {navigation.notice ? <text fg={navigation.notice.kind === "error" ? colors.danger : colors.focus}>{navigation.notice.message}</text> : null}
+      <box flexGrow={1} minHeight={0} position="relative">
+        <box position="absolute" top={0} left={0} width="100%" height="100%" visible={!form && !detail}>
+          {view === 0 ? <Overview data={data} error={loadError} onNavigate={setView} />
+            : view === 1 ? <ProjectsView /> : view === 2 ? <PlanningView /> : view === 3 ? <TasksView />
+            : view === 4 ? <ObservabilityView /> : <IntegrationsView />}
+        </box>
+        <box position="absolute" top={0} left={0} width="100%" height="100%" visible={Boolean(form)} zIndex={2}>
+          {form && <FormFields spec={form} onClose={() => setForm(undefined)} onSuccess={() => { setForm(undefined); setNotice({ message: "Operación guardada" }); refresh(); }} />}
+        </box>
+        <box position="absolute" top={0} left={0} width="100%" height="100%" visible={Boolean(detail)} zIndex={2}>
+          {detail && <Panel title={detail.title}><scrollbox focused flexGrow={1} minHeight={0} paddingY={1}>
+              {detail.rows.length ? detail.rows.map((row, i) => <text key={i} fg={i % 2 ? theme.muted : theme.text}>{clean(row)}</text>) : <Hint>Todavía no hay eventos para este elemento.</Hint>}
+            </scrollbox><Hint>Esc Volver · ↑ ↓ Desplazar</Hint></Panel>
+          }
+        </box>
+      </box>
+      <box flexDirection="column" flexShrink={0} marginTop={1}>
+        {notice && <text fg={notice.error ? theme.coral : theme.green}>{clean(notice.message)}</text>}
+        <text fg={theme.muted}>{form ? "Tab Siguiente · Shift+Tab Atrás · Esc Cancelar" : detail ? "Esc Volver" : "1–6 Vistas · ↑ ↓ Seleccionar · R Actualizar · Q Salir"}</text>
+      </box>
     </box>
-  );
+  </ConsoleContext.Provider>;
+}
+
+function Overview({ data, error, onNavigate }: { data?: DashboardData; error: string; onNavigate: (view: number) => void }) {
+  const { width } = useTerminalDimensions();
+  if (!data) return <Panel title="Bienvenido a TRAMA"><box padding={2} flexDirection="column" gap={1}>
+    <text fg={theme.text}>{error ? `API no disponible: ${clean(error)}` : "Conectando..."}</text>
+    <Hint>{error ? "R para reintentar. Comprueba el servicio con trama doctor." : "Preparando proyectos, fases y cola de trabajo."}</Hint>
+  </box></Panel>;
+  const pending = data.tasks.filter((t) => t.state === "planned").length;
+  const blocked = data.tasks.filter((t) => t.state === "blocked").length;
+  return <scrollbox focused flexGrow={1} minHeight={0}>
+    <box flexDirection="column" gap={1}>
+      {error && <text fg={theme.coral}>API no disponible · datos anteriores · R reintenta</text>}
+      <box flexDirection="row" gap={1}>
+        {[["PROYECTOS", data.status.projects ?? 0, theme.violet], ["EN CURSO", data.status.active_dispatches ?? 0, theme.cyan],
+          ["POR APROBAR", pending, theme.amber], ["BLOQUEADAS", blocked, theme.coral]].map(([label, value, color]) =>
+          <box key={String(label)} flexGrow={1} flexBasis={0} border borderStyle="rounded" borderColor={theme.border} backgroundColor={theme.panel} paddingX={1} flexDirection="column">
+            <text fg={String(color)}><b>{value}</b></text><text fg={theme.muted}>{width < 65 ? ({ PROYECTOS: "PROY.", "EN CURSO": "ACTIVAS", "POR APROBAR": "ESPERA", BLOQUEADAS: "BLOQ." } as Record<string, string>)[String(label)] : label}</text>
+          </box>)}
+      </box>
+      {data.tasks.length === 0 && <Panel title="Empieza por un objetivo" grow={0}>
+        <box flexDirection="column" gap={1} paddingY={1}><text fg={theme.text}>Convierte una idea en fases y tareas con seguimiento.</text>
+          <Hint>Registra tu proyecto, define un requisito y prepara la primera tarea.</Hint>
+          <box flexDirection="row" gap={1} flexWrap="wrap"><Action label="2 Registrar proyecto →" onPress={() => onNavigate(1)} /><Action label="3 Planificar →" onPress={() => onNavigate(2)} /><Action label="4 Crear tarea →" onPress={() => onNavigate(3)} /></box>
+        </box>
+      </Panel>}
+      <box flexDirection={width < 80 ? "column" : "row"} gap={1}>
+        <Panel title="Fases"><box flexDirection="column" paddingY={0} gap={0}>
+          {data.phases.length === 0 ? <Hint>Sin fases. En Planificación puedes crear la primera.</Hint> : data.phases.slice(0, 6).map((phase) => {
+            const progress = Math.max(0, Math.min(1, phase.progress ?? 0)); const filled = Math.round(progress * 10);
+            return <box key={phase.phase_id} flexDirection="column"><text fg={theme.text}>{clean(phase.name ?? phase.phase_id)}</text>
+              <text fg={statusColor(phase.status ?? "planned")}>{"━".repeat(filled)}<span fg={theme.border}>{"─".repeat(10 - filled)}</span> {Math.round(progress * 100)}% <span fg={theme.muted}>{phase.completed_tasks ?? 0}/{phase.total_tasks ?? 0}</span></text></box>;
+          })}
+        </box></Panel>
+        <Panel title="Agentes"><box flexDirection="column" paddingY={0} gap={0}>
+          {data.agents.length === 0 ? <Hint>Sin actividad de agentes. Consulta el coordinador en Integraciones.</Hint> : data.agents.slice(0, 6).map((agent) =>
+            <text key={agent.agent_id} fg={theme.violet}>● {clean(agent.agent_id)}<span fg={theme.muted}>  {agent.active ?? 0} activas · {agent.completed ?? 0} completas</span></text>)}
+        </box></Panel>
+      </box>
+      <Panel title="Cola de trabajo"><box flexDirection="column" paddingY={0} gap={0}>
+        <text fg={theme.muted}>ESTADO / OBJETIVO · AGENTE · ORIGEN</text>
+        {data.tasks.length === 0 ? <Hint>La cola está vacía. Las nuevas tareas esperan tu aprobación.</Hint> : data.tasks.slice(0, 8).map((task) =>
+          <box key={task.task_id} flexDirection="column"><text fg={theme.text}><span fg={statusColor(task.state ?? "planned")}>● {statusLabel(task.state ?? "planned")} </span>{clean(task.objective ?? task.task_id)}</text>
+            <Hint>{clean(task.actor)} · {clean(task.source)} · {clean(task.task_id)}</Hint></box>)}
+        {data.tasks.length > 8 && <Action label={`Ver las ${data.tasks.length} tareas →`} onPress={() => onNavigate(3)} />}
+      </box></Panel>
+    </box>
+  </scrollbox>;
 }

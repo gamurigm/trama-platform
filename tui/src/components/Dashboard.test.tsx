@@ -66,7 +66,6 @@ test("transitions from connecting to the dashboard data", async () => {
   });
   await act(async () => {
     await setup.waitForFrame((frame) => frame.includes("Run tests"));
-    await setup.waitForVisualIdle({ quietFrames: 2 });
   });
 
   expect(setup.captureCharFrame()).toContain("Run tests");
@@ -212,7 +211,7 @@ test("keeps both panel titles visible in a narrow terminal", async () => {
   await destroy(setup);
 });
 
-test("stacks App panels at 48 columns while preserving dashboard fields", async () => {
+test("keeps overview and task fields reachable by keyboard at 48 columns", async () => {
   let resolveDashboard!: (value: DashboardData) => void;
   const client = { getDashboard: () => new Promise<DashboardData>((resolve) => { resolveDashboard = resolve; }) };
   const setup = await renderApp(client, 48);
@@ -221,135 +220,23 @@ test("stacks App panels at 48 columns while preserving dashboard fields", async 
     resolveDashboard(appDashboard);
   });
   await act(async () => {
-    await setup.waitForFrame((frame) => frame.includes("Run tests"));
-    await setup.waitForVisualIdle({ quietFrames: 2 });
+    await setup.waitForFrame((frame) => frame.includes("Diseño"));
+  });
+  const initial = setup.captureCharFrame();
+  expect(initial).toContain("Fases");
+  expect(initial).toContain("Agentes");
+  expect(initial).toContain("1/2");
+  await act(async () => {
+    setup.mockInput.pressKey("\x1b[6~");
+    await setup.renderOnce();
   });
   const frame = setup.captureCharFrame();
 
-  expect(frame).toContain("Fases");
-  expect(frame).toContain("Agentes CCCC");
-  expect(frame).toContain("Tareas");
+  expect(frame).toContain("Cola de trabajo");
   expect(frame).toContain("ESTADO");
   expect(frame).toContain("OBJETIVO");
   expect(frame).toContain("AGENTE");
   expect(frame).toContain("ORIGEN");
   expect(frame).toContain("Run tests");
-  expect(frame).toContain("1/2");
-  await destroy(setup as never);
-});
-
-test("opens the command palette with slash", async () => {
-  const client = { getDashboard: async () => appDashboard };
-  const setup = await renderApp(client, 100);
-
-  await act(async () => {
-    await setup.waitForFrame((frame) => frame.includes("Run tests"));
-  });
-  setup.mockInput.pressKey("/");
-  await setup.waitForFrame((frame) => frame.includes("Command palette"));
-
-  expect(setup.captureCharFrame()).toContain("Command palette");
-  await destroy(setup as never);
-});
-
-test("moves between shell screens with arrow keys", async () => {
-  const client = { getDashboard: async () => appDashboard };
-  const setup = await renderApp(client, 100);
-  await act(async () => { await setup.waitForFrame((frame) => frame.includes("Run tests")); });
-  await act(async () => { setup.mockInput.pressArrow("down"); });
-  await setup.waitForFrame((frame) => frame.includes("TRAMA  ·  Projects"));
-  expect(setup.captureCharFrame()).toContain("Projects");
-  setup.mockInput.pressArrow("up");
-  await setup.waitForFrame((frame) => frame.includes("TRAMA  ·  Dashboard"));
-  expect(setup.captureCharFrame()).toContain("Dashboard");
-  await destroy(setup as never);
-});
-
-test("opens the selected task timeline with Enter", async () => {
-  const tasksDashboard: DashboardData = {
-    ...appDashboard,
-    tasks: [
-      ...appDashboard.tasks,
-      { task_id: "task-2", objective: "Deploy", actor: "hermes", state: "queued", source: "local" },
-    ],
-  };
-  const client = {
-    getDashboard: async () => tasksDashboard,
-    getTaskTimeline: async (taskId: string) => [{ entry_id: "entry-1", kind: "event", sequence: 1, actor: "system", action: `${taskId}.accepted`, status: "accepted" }],
-  };
-  const setup = await renderApp(client, 100);
-  await act(async () => { await setup.waitForFrame((frame) => frame.includes("Run tests")); });
-  await act(async () => { setup.mockInput.pressArrow("down"); });
-  await setup.waitForFrame((frame) => frame.includes("Projects"));
-  await act(async () => { setup.mockInput.pressArrow("down"); });
-  await setup.waitForFrame((frame) => frame.includes("Tasks"));
-  await setup.waitForVisualIdle({ quietFrames: 2 });
-  await act(async () => { setup.mockInput.pressArrow("down"); });
-  await setup.waitForFrame((frame) => frame.includes("Deploy") && frame.includes("[Enter detalle]"));
-  await act(async () => { setup.mockInput.pressEnter(); });
-  await setup.waitForFrame((frame) => frame.includes("Timeline"));
-  expect(setup.captureCharFrame()).toContain("task-2.accepted");
-  setup.mockInput.pressEscape();
-  await setup.waitForFrame((frame) => frame.includes("TRAMA  ·  Tasks"));
-  await destroy(setup as never);
-});
-
-test("leaves Tasks at the list boundaries with arrow keys", async () => {
-  const client = { getDashboard: async () => appDashboard };
-  const setup = await renderApp(client, 100);
-  await act(async () => { await setup.waitForFrame((frame) => frame.includes("Run tests")); });
-  await act(async () => { setup.mockInput.pressArrow("down"); });
-  await setup.waitForFrame((frame) => frame.includes("Projects"));
-  await act(async () => { setup.mockInput.pressArrow("down"); });
-  await setup.waitForFrame((frame) => frame.includes("Tasks"));
-  await act(async () => { setup.mockInput.pressArrow("up"); });
-  await setup.waitForFrame((frame) => frame.includes("TRAMA  ·  Projects"));
-  await destroy(setup as never);
-});
-
-test("keeps screen navigation available when Tasks is empty", async () => {
-  const client = { getDashboard: async () => ({ ...appDashboard, tasks: [] }) };
-  const setup = await renderApp(client, 100);
-  await act(async () => { await setup.waitForFrame((frame) => frame.includes("TRAMA  ·  Dashboard")); });
-  await act(async () => { setup.mockInput.pressArrow("down"); });
-  await setup.waitForFrame((frame) => frame.includes("TRAMA  ·  Projects"));
-  await act(async () => { setup.mockInput.pressArrow("down"); });
-  await setup.waitForFrame((frame) => frame.includes("TRAMA  ·  Tasks"));
-  await act(async () => { setup.mockInput.pressArrow("up"); });
-  await setup.waitForFrame((frame) => frame.includes("TRAMA  ·  Projects"));
-  await destroy(setup as never);
-});
-
-test("shows the shell title and keyboard hints at a narrow width", async () => {
-  const client = { getDashboard: async () => appDashboard };
-  const setup = await renderApp(client, 48);
-
-  await act(async () => {
-    await setup.waitForFrame((frame) => frame.includes("Run tests"));
-    await setup.waitForVisualIdle({ quietFrames: 2 });
-  });
-
-  const frame = setup.captureCharFrame();
-  expect(frame).toContain("Dashboard");
-  expect(frame).toContain("[r]");
-  await destroy(setup as never);
-});
-
-test("keeps the last dashboard projection when a refresh fails", async () => {
-  let calls = 0;
-  const client = {
-    getDashboard: async () => {
-      calls += 1;
-      if (calls > 1) throw new Error("offline");
-      return appDashboard;
-    },
-  };
-  const setup = await renderApp(client);
-  await act(async () => { await setup.waitForFrame((frame) => frame.includes("Run tests")); });
-  setup.mockInput.pressKey("r");
-  await setup.waitForFrame((frame) => frame.includes("obsoletos"));
-  const frame = setup.captureCharFrame();
-  expect(frame).toContain("Run tests");
-  expect(frame).toContain("obsoletos");
   await destroy(setup as never);
 });

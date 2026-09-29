@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -215,6 +216,7 @@ func (s Server) submitTask(writer http.ResponseWriter, request *http.Request) {
 		}
 	}
 
+	admissionStarted := time.Now()
 	result, err := s.admission.Admit(request.Context(), task, request.Header.Get("Idempotency-Key"))
 	if err != nil {
 		status := http.StatusInternalServerError
@@ -237,6 +239,8 @@ func (s Server) submitTask(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
+	log.Printf("task_admitted task_id=%q admission_id=%q admission_duration_ms=%d",
+		result.TaskID, result.AdmissionID, time.Since(admissionStarted).Milliseconds())
 	writeJSON(writer, http.StatusAccepted, taskResponse{TaskID: result.TaskID, Status: result.Status})
 }
 

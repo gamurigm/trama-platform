@@ -5,7 +5,9 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import time
 from collections.abc import Awaitable, Callable, Mapping
+from datetime import datetime, timezone
 from threading import RLock
 from typing import Any, Literal, Protocol
 
@@ -76,21 +78,44 @@ class TaskAdmittedConsumer:
         decision = self.inbox.claim(event_id)
         if decision == "duplicate":
             await message.ack()
+            logger.info("task_delivery_duplicate_ack event_id=%s", event_id)
             return True
         if decision == "in_flight":
             return False
 
+        handoff_started = time.perf_counter()
+        task_id = "unknown"
         try:
             task = _task_from_message(message.data)
+            task_id = task.task_id
+            logger.info(
+                "task_delivery_received event_id=%s task_id=%s nats_to_worker_ms=%s",
+                event_id,
+                task_id,
+                _nats_to_worker_ms(message.headers),
+            )
             result = self.handler(task)
             if inspect.isawaitable(result):
                 await result
         except BaseException:
             self.inbox.release(event_id)
+            logger.exception(
+                "task_handoff_failed event_id=%s task_id=%s python_handoff_ms=%.3f",
+                event_id,
+                task_id,
+                (time.perf_counter() - handoff_started) * 1000,
+            )
             raise
 
         self.inbox.complete(event_id)
+        handoff_ms = (time.perf_counter() - handoff_started) * 1000
         await message.ack()
+        logger.info(
+            "task_handoff_completed event_id=%s task_id=%s python_handoff_ms=%.3f",
+            event_id,
+            task_id,
+            handoff_ms,
+        )
         return True
 
     async def run(
@@ -144,6 +169,19 @@ def _event_id(message: JetStreamMessage) -> str:
     if not event_id:
         raise ValueError("task.admitted.v1 requires Nats-Msg-Id")
     return event_id
+
+
+def _nats_to_worker_ms(headers: Mapping[str, str] | None) -> int | str:
+    published_at = (headers or {}).get("Trama-Published-At")
+    if not published_at:
+        return "unknown"
+    try:
+        published = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+        if published.tzinfo is None:
+            return "unknown"
+        return max(0, round((datetime.now(timezone.utc) - published).total_seconds() * 1000))
+    except (TypeError, ValueError):
+        return "unknown"
 
 
 def _task_from_message(data: bytes) -> TaskEnvelope:

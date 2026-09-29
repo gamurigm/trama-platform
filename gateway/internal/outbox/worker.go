@@ -5,12 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
+	"time"
 )
 
 type Event struct {
 	ID         string
 	Type       string
+	TaskID     string
+	CreatedAt  time.Time
 	Subject    string
 	Payload    json.RawMessage
 	ClaimToken string
@@ -48,6 +52,15 @@ func (w *Worker) PublishPending(ctx context.Context, limit int) (int, error) {
 		}
 		if err := w.store.MarkPublished(ctx, event); err != nil {
 			return published, fmt.Errorf("mark %s published: %w", event.ID, err)
+		}
+		if event.CreatedAt.IsZero() {
+			slog.Info("gateway outbox event published", "event_id", event.ID, "task_id", event.TaskID)
+		} else {
+			slog.Info("gateway outbox event published",
+				"event_id", event.ID,
+				"task_id", event.TaskID,
+				"outbox_age_ms", time.Since(event.CreatedAt).Milliseconds(),
+			)
 		}
 		published++
 	}

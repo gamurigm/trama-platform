@@ -49,9 +49,9 @@ Ejecutar pruebas:
 
 ## CLI gateway
 
-El CLI es la interfaz operativa principal de TRAMA. La API local conserva el
-estado y la TUI ofrece una vista interactiva de la misma información; no existe
-un dashboard web paralelo.
+`trama` abre la consola TypeScript y levanta su API local cuando hace falta.
+La API Python conserva el estado y las reglas de ejecución. Los subcomandos
+siguen disponibles para scripts y operaciones puntuales.
 
 ```powershell
 trama up
@@ -79,18 +79,50 @@ análisis; Utopia se incorpora solo cuando `TRAMA_UTOPIA_MCP_URL` está definido
 
 ### TUI TypeScript
 
-Para iniciar la TUI TypeScript, levanta primero la API local y, desde la raíz
-del repositorio, ejecuta:
+La única TUI usa Bun y OpenTUI. Desde cualquier directorio, con el comando
+global instalado en `%USERPROFILE%\.local\bin`, ejecuta:
 
 ```powershell
-.\.venv\Scripts\python.exe -m trama_platform api --host 127.0.0.1 --port 8090
-bun install --cwd tui
-bun run --cwd tui start
+trama
+# Equivalente:
+trama tui
 ```
 
-La TUI usa `TRAMA_API_URL` para seleccionar la API; si no se define, utiliza
-`http://127.0.0.1:8090`. `trama tui` permanece disponible como fallback de la
-TUI Python.
+Para preparar un checkout nuevo: `uv sync --extra dev` y `bun install --cwd tui`.
+Puedes iniciarlo con `uv run trama tui`. La TUI usa `TRAMA_API_URL` (por defecto
+`http://127.0.0.1:8090`; el comando global de esta máquina usa `8091` porque
+el puerto `8090` ya tiene un servicio TRAMA administrado desde WSL. El lanzador transmite el token a su proceso hijo sin
+mostrarlo y `TRAMA_APP_ROOT` fija la ubicación de la base de datos del proyecto,
+independientemente del directorio desde el que abras la consola.
+
+| Vista | Operaciones |
+| --- | --- |
+| 1 Resumen | Cola, progreso de fases y actividad de agentes |
+| 2 Proyectos | `N` registrar; `Enter` activar el proyecto seleccionado |
+| 3 Planificación | `N` requisito, `F` fase, `P` propuesta, `A` aprobar, `Tab` cambiar lista |
+| 4 Tareas | `N` crear, `A` aprobar, `X` cancelar, `T` reintentar; `Enter` timeline y logs |
+| 5 Actividad | `F` filtrar por proyecto, requisito, fase, tarea o nivel |
+| 6 Integraciones | `Tab` conexiones/configuración, `E` editar, `T` diagnosticar, `X` borrar valor |
+
+Usa `1`–`6` para navegar, `↑`/`↓` para seleccionar, `PgUp`/`PgDn` para desplazar
+el detalle, `R` para actualizar y `Q` para salir. En formularios: `Enter` o `Tab`
+avanza, `Shift+Tab` retrocede, `Esc` cancela y `Ctrl+Enter` avanza desde texto
+multilínea. Siempre hay una revisión final antes de guardar. Las tareas nuevas
+quedan **por aprobar** hasta que una persona las autoriza.
+
+Los parámetros no sensibles se guardan en `%LOCALAPPDATA%\TRAMA\config.json`.
+Los tokens se guardan en **Credenciales de Windows** y sus campos permanecen
+ocultos. Las variables de entorno tienen prioridad: la consola muestra el
+origen efectivo y los cambios pendientes de reinicio. `P` en Integraciones
+reinicia la API administrada para aplicar esos cambios. Dirección, puerto y
+directorio de datos son parámetros de arranque de solo lectura en esta vista.
+
+Los diagnósticos distinguen conectado, sin respuesta, sin configurar, no
+instalado, detenido y no implementado. Una URL guardada no prueba una conexión.
+Con Hermes seleccionado, `H` prepara su entrada MCP manteniendo otras claves
+y las aprobaciones manuales; **no instala Hermes**. La lista de herramientas
+expuestas por TRAMA se distingue de la allowlist de Hermes. Con CCCC seleccionado,
+`S` inicia y `D` detiene su daemon; el backend de TRAMA se cambia por separado.
 
 La TUI TypeScript es un cockpit operativo OpenTUI. Su dashboard reúne Projects,
 Tasks, Agents, Queues, Workers, Events, Memory y System health sin duplicar el

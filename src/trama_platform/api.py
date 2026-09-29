@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from hmac import compare_digest
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from .context import ContextError, RequestContext
@@ -50,10 +51,8 @@ def create_app(
         state_store=state_store,
         queue_capacity=settings_instance.queue_capacity,
         max_concurrency=settings_instance.max_concurrency,
-        dispatch_timeout_seconds=(
-            settings_instance.dispatch_timeout_seconds
-        ),
-        lease_seconds=settings.task_lease_seconds if settings else 60,
+        dispatch_timeout_seconds=settings_instance.dispatch_timeout_seconds,
+        lease_seconds=settings_instance.task_lease_seconds,
     )
 
     @asynccontextmanager
@@ -200,6 +199,27 @@ def create_app(
             "latest_activity": activity,
         }
 
+    from .config_contracts import register_config_routes
+
+    register_config_routes(app, settings_instance)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(_: Request, exc: RequestValidationError):
+        # Pydantic's default error includes raw inputs, including credential payloads.
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": [
+                    {
+                        "loc": list(error["loc"]),
+                        "type": error["type"],
+                        "msg": "Valor no válido; revisa el campo indicado",
+                    }
+                    for error in exc.errors()
+                ]
+            },
+        )
+
     @app.middleware("http")
     async def require_api_token(request: Request, call_next):
         expected = settings.api_token if settings else None
@@ -207,7 +227,9 @@ def create_app(
         if expected and not probe_path:
             authorization = request.headers.get("authorization", "")
             scheme, _, supplied = authorization.partition(" ")
-            if scheme.casefold() != "bearer" or not compare_digest(supplied, expected):
+            if scheme.casefold() != "bearer" or not compare_digest(
+                supplied.encode("utf-8"), expected.encode("utf-8")
+            ):
                 return JSONResponse(
                     status_code=401,
                     content={"detail": "Se requiere un token Bearer válido"},
@@ -744,6 +766,13 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/v1/plans", response_model=list[PlanProposal])
+    def list_plans(request: Request) -> list[PlanProposal]:
+        proposals = app.state.runtime.list_plan_proposals(
+            organization_id=request_organization(request)
+        )
+        return visible_items(request, proposals)  # type: ignore[return-value]
 
     @app.get("/v1/plans/{proposal_id}", response_model=PlanProposal)
     def get_plan(request: Request, proposal_id: str) -> PlanProposal:

@@ -1,19 +1,6 @@
-import type {
-  Agent,
-  DashboardData,
-  HealthStatus,
-  LogQuery,
-  MemoryCandidate,
-  OperationEvent,
-  Overview,
-  Phase,
-  ProjectManifest,
-  Status,
-  Task,
-  TaskAction,
-  TaskLog,
-  TimelineEntry,
-} from "./types";
+import type { Agent, DashboardData, Overview, Phase, Status, Task } from "./types";
+import type { Project, Requirement, ProjectPhase, PlanProposal, TaskEnvelope, TimelineEntry,
+  TaskLog, ConfigSnapshot, IntegrationSnapshot, IntegrationReport, SecretInfo, LogFilters } from "./types";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -105,91 +92,7 @@ function status(value: Record<string, unknown>, endpoint: string): Status {
   optionalNumber(value, "projects", endpoint);
   optionalNumber(value, "queue_depth", endpoint);
   optionalNumber(value, "active_dispatches", endpoint);
-  optionalNumber(value, "queue_capacity", endpoint);
-  optionalNumber(value, "max_concurrency", endpoint);
-  optionalString(value, "dispatcher_status", endpoint);
-  optionalNumber(value, "results", endpoint);
   return value as Status;
-}
-
-function health(value: Record<string, unknown>, endpoint: string): HealthStatus {
-  requiredString(value, "status", endpoint);
-  requiredString(value, "service", endpoint);
-  return value as HealthStatus;
-}
-
-function project(value: Record<string, unknown>, endpoint: string): ProjectManifest {
-  requiredString(value, "project_id", endpoint);
-  requiredString(value, "repository", endpoint);
-  optionalString(value, "organization_id", endpoint);
-  optionalString(value, "default_branch", endpoint);
-  return value as ProjectManifest;
-}
-
-function event(value: Record<string, unknown>, endpoint: string): OperationEvent {
-  requiredString(value, "action", endpoint);
-  requiredString(value, "status", endpoint);
-  optionalString(value, "event_id", endpoint);
-  optionalString(value, "actor", endpoint);
-  optionalString(value, "project_id", endpoint);
-  optionalString(value, "task_id", endpoint);
-  optionalString(value, "created_at", endpoint);
-  return value as OperationEvent;
-}
-
-function log(value: Record<string, unknown>, endpoint: string): TaskLog {
-  requiredString(value, "message", endpoint);
-  requiredString(value, "project_id", endpoint);
-  requiredString(value, "correlation_id", endpoint);
-  optionalString(value, "log_id", endpoint);
-  optionalString(value, "created_at", endpoint);
-  optionalString(value, "level", endpoint);
-  optionalString(value, "task_id", endpoint);
-  return value as TaskLog;
-}
-
-function timeline(value: Record<string, unknown>, endpoint: string): TimelineEntry {
-  requiredString(value, "entry_id", endpoint);
-  requiredString(value, "kind", endpoint);
-  requiredNumber(value, "sequence", endpoint);
-  requiredString(value, "actor", endpoint);
-  optionalString(value, "created_at", endpoint);
-  optionalString(value, "action", endpoint);
-  optionalString(value, "status", endpoint);
-  optionalString(value, "message", endpoint);
-  optionalString(value, "task_id", endpoint);
-  return value as TimelineEntry;
-}
-
-function memoryCandidate(value: Record<string, unknown>, endpoint: string): MemoryCandidate {
-  requiredString(value, "candidate_id", endpoint);
-  requiredString(value, "project_id", endpoint);
-  requiredString(value, "subject", endpoint);
-  requiredString(value, "fact", endpoint);
-  optionalString(value, "agent_id", endpoint);
-  optionalString(value, "status", endpoint);
-  optionalNumber(value, "confidence", endpoint);
-  optionalString(value, "created_at", endpoint);
-  return value as MemoryCandidate;
-}
-
-function requiredNumber(value: Record<string, unknown>, field: string, endpoint: string): void {
-  if (typeof value[field] !== "number") {
-    invalidPayload(endpoint, `Expected ${field} to be a number`);
-  }
-}
-
-function boundedLimit(limit: number | undefined): number {
-  return Math.max(1, Math.min(1000, Math.trunc(limit ?? 100)));
-}
-
-function addQuery(endpoint: string, entries: Array<[string, string | number | undefined]>): string {
-  const query = new URLSearchParams();
-  for (const [key, value] of entries) {
-    if (value !== undefined) query.set(key, String(value));
-  }
-  const encoded = query.toString();
-  return encoded ? `${endpoint}?${encoded}` : endpoint;
 }
 
 function overview(value: Record<string, unknown>, endpoint: string): Overview {
@@ -205,6 +108,15 @@ export class TramaApiClient {
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
+  private token: string | undefined;
+  private pendingToken: string | null | undefined;
+
+  setToken(token?: string) { this.token = token || undefined; }
+  stageToken(token: string | null) { this.pendingToken = token; }
+  activateStagedToken() {
+    if (this.pendingToken !== undefined) this.setToken(this.pendingToken ?? undefined);
+    this.pendingToken = undefined;
+  }
 
   constructor(baseUrl: string, fetchImpl: typeof fetch = fetch, timeoutMs = DEFAULT_TIMEOUT_MS) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
@@ -216,64 +128,8 @@ export class TramaApiClient {
     return status(await this.getObject("/v1/status"), "/v1/status");
   }
 
-  async getOverview(projectId?: string): Promise<Overview> {
-    const endpoint = addQuery("/v1/overview", [["project_id", projectId]]);
-    return overview(await this.getObject(endpoint), "/v1/overview");
-  }
-
-  async listProjects(): Promise<ProjectManifest[]> {
-    const endpoint = "/v1/projects";
-    return collection(await this.getJson(endpoint), "projects", endpoint, project);
-  }
-
-  async getHealth(): Promise<HealthStatus> {
-    const endpoint = "/health";
-    return health(await this.getObject(endpoint), endpoint);
-  }
-
-  async listAgents(): Promise<Agent[]> {
-    const endpoint = "/v1/agents";
-    return collection(await this.getJson(endpoint), "agents", endpoint, agent);
-  }
-
-  async listMemoryCandidates(organizationId: string, projectId: string): Promise<MemoryCandidate[]> {
-    const endpoint = addQuery("/v1/memory/candidates", [["organization_id", organizationId], ["project_id", projectId]]);
-    return collection(await this.getJson(endpoint), "memory", "/v1/memory/candidates", memoryCandidate);
-  }
-
-  async listEvents(limit = 100): Promise<OperationEvent[]> {
-    const endpoint = addQuery("/v1/events", [["limit", boundedLimit(limit)]]);
-    return collection(await this.getJson(endpoint), "events", "/v1/events", event);
-  }
-
-  async listLogs(params: LogQuery = {}): Promise<TaskLog[]> {
-    const endpoint = addQuery("/v1/logs", [
-      ["organization_id", params.organizationId],
-      ["project_id", params.projectId],
-      ["task_id", params.taskId],
-      ["phase_id", params.phaseId],
-      ["requirement_id", params.requirementId],
-      ["level", params.level],
-      ["limit", boundedLimit(params.limit)],
-    ]);
-    return collection(await this.getJson(endpoint), "logs", "/v1/logs", log);
-  }
-
-  async getTaskTimeline(taskId: string, limit = 100): Promise<TimelineEntry[]> {
-    const endpoint = addQuery(`/v1/tasks/${encodeURIComponent(taskId)}/timeline`, [["limit", boundedLimit(limit)]]);
-    return collection(await this.getJson(endpoint), "timeline", "/v1/tasks/:taskId/timeline", timeline);
-  }
-
-  async approveTask(taskId: string, approver = "tui"): Promise<Task> {
-    return this.postTaskAction(taskId, "approve", { approver });
-  }
-
-  async cancelTask(taskId: string): Promise<Task> {
-    return this.postTaskAction(taskId, "cancel");
-  }
-
-  async retryTask(taskId: string): Promise<Task> {
-    return this.postTaskAction(taskId, "retry");
+  async getOverview(): Promise<Overview> {
+    return overview(await this.getObject("/v1/overview"), "/v1/overview");
   }
 
   async getTasks(): Promise<Task[]> {
@@ -281,8 +137,49 @@ export class TramaApiClient {
     return collection(payload, "tasks", "/v1/tasks", task);
   }
 
-  async getDashboard(projectId?: string): Promise<DashboardData> {
-    const [status, overview] = await Promise.all([this.getStatus(), this.getOverview(projectId)]);
+  getHealth() {
+    return this.entity<{ status: string; service: string }>("/health", ["status", "service"]);
+  }
+
+  listProjects() {
+    return this.list<Project>("/v1/projects", ["project_id", "repository"]);
+  }
+
+  listEvents(limit = 100) {
+    const bounded = Math.max(1, Math.min(limit, 1000));
+    return this.list<{ action: string; status: string }>(
+      `/v1/events?limit=${bounded}`,
+      ["action", "status"],
+    );
+  }
+
+  listLogs(filters: { projectId?: string; taskId?: string; limit?: number } = {}) {
+    const params = new URLSearchParams();
+    if (filters.projectId) params.set("project_id", filters.projectId);
+    if (filters.taskId) params.set("task_id", filters.taskId);
+    if (filters.limit) params.set("limit", String(Math.max(1, Math.min(filters.limit, 1000))));
+    const suffix = params.size ? `?${params}` : "";
+    return this.list<TaskLog>(`/v1/logs${suffix}`, ["project_id", "message", "correlation_id"]);
+  }
+
+  getTaskTimeline(taskId: string, limit = 100) {
+    const bounded = Math.max(1, Math.min(limit, 1000));
+    return this.list<TimelineEntry>(
+      `/v1/tasks/${encodeURIComponent(taskId)}/timeline?limit=${bounded}`,
+      ["entry_id", "kind", "actor"],
+    );
+  }
+
+  cancelTask(taskId: string) {
+    return this.transitionTask(taskId, "cancel");
+  }
+
+  approveTask(taskId: string, approver = "tui") {
+    return this.approve("tasks", taskId, approver);
+  }
+
+  async getDashboard(): Promise<DashboardData> {
+    const [status, overview] = await Promise.all([this.getStatus(), this.getOverview()]);
     const tasks = Array.isArray(overview.queue) ? overview.queue : await this.getTasks();
     return {
       status,
@@ -292,6 +189,56 @@ export class TramaApiClient {
     };
   }
 
+  private async list<T>(endpoint: string, fields: string[]): Promise<T[]> {
+    return collection(await this.getJson(endpoint), "items", endpoint, (value) => {
+      for (const field of fields) requiredString(value, field, endpoint);
+      return value as T;
+    });
+  }
+
+  private async entity<T>(endpoint: string, fields: string[], method = "GET", body?: unknown): Promise<T> {
+    const payload = await this.getJson(endpoint, method, body);
+    if (!isObject(payload)) invalidPayload(endpoint, "Respuesta no válida");
+    for (const field of fields) requiredString(payload, field, endpoint);
+    return payload as T;
+  }
+
+  getProjects() { return this.list<Project>("/v1/projects", ["project_id", "organization_id", "repository", "default_branch"]); }
+  registerProject(value: Project) { return this.entity<Project>("/v1/projects", ["project_id"], "POST", value); }
+  getRequirements(project?: string) { return this.list<Requirement>(`/v1/requirements${query({ project_id: project })}`, ["requirement_id", "project_id", "title", "description", "status"]); }
+  registerRequirement(value: Requirement) { return this.entity<Requirement>("/v1/requirements", ["requirement_id"], "POST", value); }
+  getPhases(project?: string) { return this.list<ProjectPhase>(`/v1/phases${query({ project_id: project })}`, ["phase_id", "project_id", "requirement_id", "name", "status"]); }
+  registerPhase(value: ProjectPhase) { return this.entity<ProjectPhase>("/v1/phases", ["phase_id"], "POST", value); }
+  getPlans() { return this.list<PlanProposal>("/v1/plans", ["proposal_id", "requirement_id", "project_id", "summary", "status", "correlation_id"]); }
+  registerPlan(value: PlanProposal) { return this.entity<PlanProposal>("/v1/plans", ["proposal_id"], "POST", value); }
+  getTaskEnvelopes() { return this.list<TaskEnvelope>("/v1/tasks", ["task_id", "project_id", "objective", "actor", "state", "repository", "branch", "worktree"]); }
+  submitTask(value: TaskEnvelope) { return this.entity<{task_id: string; status: string}>("/v1/tasks", ["task_id", "status"], "POST", value); }
+  approve(kind: "tasks" | "phases" | "plans", id: string, approver: string) {
+    if (!approver.trim()) throw new Error("Indica quién aprueba esta operación");
+    return this.entity(`/v1/${kind}/${encodeURIComponent(id)}/approve`, [], "POST", { approver });
+  }
+  transitionTask(id: string, action: "cancel" | "retry") { return this.entity<TaskEnvelope>(`/v1/tasks/${encodeURIComponent(id)}/${action}`, ["task_id", "state"], "POST"); }
+  timeline(kind: "tasks" | "phases", id: string) { return this.list<TimelineEntry>(`/v1/${kind}/${encodeURIComponent(id)}/timeline`, ["entry_id", "kind", "actor", "created_at"]); }
+  getLogs(filters: LogFilters = {}) { return this.list<TaskLog>(`/v1/logs${query(filters)}`, ["log_id", "created_at", "level", "message", "actor", "correlation_id"]); }
+  getAgents() { return this.list<Agent>("/v1/agents", ["agent_id"]); }
+  async getConfig(): Promise<ConfigSnapshot> {
+    const value = await this.getObject("/v1/config");
+    if (!Array.isArray(value.settings) || !Array.isArray(value.secrets) || typeof value.restart_required !== "boolean") invalidPayload("/v1/config", "Configuración no válida");
+    return value as ConfigSnapshot;
+  }
+  saveConfig(values: Record<string, string | number | null>) { return this.entity<ConfigSnapshot>("/v1/config", [], "PUT", { values }); }
+  getSecrets() { return this.list<SecretInfo>("/v1/config/secrets", ["name"]); }
+  setSecret(name: string, value: string) { return this.entity<SecretInfo>(`/v1/config/secrets/${encodeURIComponent(name)}`, ["name"], "PUT", { value }); }
+  deleteSecret(name: string) { return this.entity<SecretInfo>(`/v1/config/secrets/${encodeURIComponent(name)}`, ["name"], "DELETE"); }
+  async getIntegrations(): Promise<IntegrationSnapshot> {
+    const value = await this.getObject("/v1/integrations");
+    if (!Array.isArray(value.integrations) || !Array.isArray(value.tools)) invalidPayload("/v1/integrations", "Diagnóstico no válido");
+    return value as IntegrationSnapshot;
+  }
+  checkIntegration(id: string) { return this.entity<IntegrationReport>(`/v1/integrations/${encodeURIComponent(id)}/check`, ["id", "status", "detail"], "POST"); }
+  cccc(action: "start" | "stop") { return this.entity<IntegrationReport>(`/v1/integrations/cccc/${action}`, ["id", "status"], "POST"); }
+  configureHermes() { return this.entity<IntegrationReport>("/v1/integrations/hermes/configure", ["id", "status"], "POST"); }
+
   private async getObject(endpoint: string): Promise<Record<string, unknown>> {
     const payload = await this.getJson(endpoint);
     if (!isObject(payload)) {
@@ -300,24 +247,26 @@ export class TramaApiClient {
     return payload;
   }
 
-  private async postTaskAction(taskId: string, action: TaskAction, body?: Record<string, string>): Promise<Task> {
-    const endpoint = `/v1/tasks/${encodeURIComponent(taskId)}/${action}`;
-    const payload = await this.getJson(endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    if (!isObject(payload)) throw new ApiError("Expected an object response", undefined, endpoint);
-    return task(payload, endpoint);
-  }
-
-  private async getJson(endpoint: string, init?: RequestInit): Promise<unknown> {
+  private async getJson(endpoint: string, method = "GET", body?: unknown): Promise<unknown> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      const response = await this.fetchImpl(`${this.baseUrl}${endpoint}`, { ...init, signal: controller.signal });
+      const response = await this.fetchImpl(`${this.baseUrl}${endpoint}`, {
+        signal: controller.signal, method,
+        headers: { ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+          ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}) },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
       if (!response.ok) {
-        throw new ApiError(`API request failed with status ${response.status}`, response.status, endpoint);
+        let detail = "";
+        if (!endpoint.includes("/secrets/")) {
+          try {
+            const error = await response.json() as {detail?: unknown};
+            if (typeof error.detail === "string") detail = error.detail;
+            else if (Array.isArray(error.detail)) detail = error.detail.map((item) => `${item.loc?.slice(1).join(".")}: ${item.msg}`).join(" · ");
+          } catch {}
+        }
+        throw new ApiError(detail || `API request failed with status ${response.status}`, response.status, endpoint);
       }
       try {
         return await response.json();
@@ -335,4 +284,10 @@ export class TramaApiClient {
       clearTimeout(timeout);
     }
   }
+}
+
+function query(values: Record<string, string | undefined>): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(values)) if (value) params.set(key, value);
+  return params.size ? `?${params}` : "";
 }

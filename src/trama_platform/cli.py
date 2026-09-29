@@ -267,7 +267,7 @@ def _run_control_command(args: argparse.Namespace) -> None:
             "--port",
             str(settings.api_port),
         ]
-        supervisor = GatewaySupervisor(state_dir=settings.state_dir, command=command)
+        supervisor = GatewaySupervisor(state_dir=settings.state_path.parent, command=command)
         result = supervisor.start() if args.command == "up" else supervisor.stop()
         _emit(result, as_json=args.as_json)
         return
@@ -470,7 +470,7 @@ def main() -> None:
     schema_parser = subparsers.add_parser("export-schemas")
     schema_parser.add_argument("destination", type=Path)
 
-    args = parser.parse_args()
+    args = parser.parse_args(sys.argv[1:] or ["tui"])
     if args.command == "api":
         import uvicorn
 
@@ -533,13 +533,11 @@ def main() -> None:
     }:
         _run_control_command(args)
     elif args.command == "tui":
-        from .tui import run_tui
-
-        run_tui(
-            args.api_url,
-            gateway_url=args.gateway_url,
-            gateway_token=settings.gateway_token,
-        )
+        from .tui_launcher import launch_tui
+        try:
+            raise SystemExit(launch_tui(settings, args.api_url))
+        except RuntimeError as exc:
+            raise SystemExit(str(exc)) from None
     elif args.command == "validate-project":
         print(
             json.dumps(

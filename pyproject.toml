@@ -16,7 +16,7 @@ dependencies = [
   "pydantic>=2.10,<3",
   "psycopg[binary]>=3.2,<4",
   "PyYAML>=6.0,<7",
-  "textual>=0.80,<1",
+  "keyring>=25.7,<26",
   "uvicorn[standard]>=0.34,<1",
 ]
 

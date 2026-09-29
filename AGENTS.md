@@ -5,14 +5,17 @@ para proyectos, tareas, resultados y candidatos de memoria.
 
 ## Kubernetes y WSL
 
-- Para este proyecto, las tareas de Kubernetes se ejecutan mediante WSL.
+- Para este proyecto, las tareas de Docker y Kubernetes se ejecutan mediante WSL.
 - Esta regla aplica únicamente a `trama-platform`; no modifica las prácticas
   de otros proyectos.
+- Antes de usar Docker Compose, verificar desde WSL que estén disponibles Docker
+  y el plugin Compose; ejecutar allí los comandos sobre los archivos del
+  repositorio.
 - Antes de usar Kubernetes, verificar desde WSL que estén disponibles los
   comandos y el contexto necesarios (`kubectl`, `helm` y el runtime local o
   clúster configurado).
-- No instalar ni cambiar herramientas globales de Windows para Kubernetes sin
-  autorización explícita.
+- No instalar ni cambiar herramientas globales de Windows para Docker o
+  Kubernetes sin autorización explícita.
 
 
 ## Gateway Go y modo distribuido

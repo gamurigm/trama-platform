@@ -679,6 +679,20 @@ def test_runtime_refreshes_projects_written_by_the_control_api_process(tmp_path:
         worker_runtime.close()
 
 
+def test_runtime_reads_tasks_written_by_a_separate_worker_process(tmp_path: Path):
+    database = tmp_path / "trama.db"
+    api_runtime = TramaRuntime(state_store=SqliteStateStore(database))
+    worker_store = SqliteStateStore(database)
+    persisted_task = task("cross-process-task").model_copy(update={"state": "running"})
+    try:
+        worker_store.save_task(persisted_task)
+
+        assert api_runtime.list_tasks() == [persisted_task]
+        assert api_runtime.get_task(persisted_task.task_id) == persisted_task
+    finally:
+        api_runtime.close()
+
+
 def test_runtime_refreshes_shared_store_before_reads(tmp_path: Path):
     database = tmp_path / "shared.db"
     first = TramaRuntime(state_store=SqliteStateStore(database))

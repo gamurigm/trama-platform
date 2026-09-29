@@ -1302,6 +1302,18 @@ class TramaRuntime:
         except KeyError as exc:
             raise KeyError(f"La propuesta {proposal_id} no esta registrada") from exc
 
+    def list_plan_proposals(
+        self, *, organization_id: str | None = None
+    ) -> list[PlanProposal]:
+        proposals = self.proposals.values()
+        if organization_id is not None:
+            proposals = (
+                proposal
+                for proposal in proposals
+                if proposal.organization_id == organization_id
+            )
+        return sorted(proposals, key=lambda proposal: proposal.created_at)
+
     def _parallel_groups(self, phases: list[ProjectPhase]) -> list[dict[str, list[str]]]:
         groups: dict[tuple[str, ...], list[ProjectPhase]] = {}
         for phase in phases:

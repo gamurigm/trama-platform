@@ -27,8 +27,12 @@ from .local_agents import (
 from .mcp_server import TramaApiClient, create_mcp_server
 from .nats_consumer import TaskAdmittedConsumer
 from .runtime import TramaRuntime
-from .state_store import PostgresStateStore, PostgresTaskInbox, SqliteStateStore, SqliteTaskInbox
-from .tui import TramaTuiApp
+from .state_store import (
+    PostgresStateStore,
+    PostgresTaskInbox,
+    SqliteStateStore,
+    SqliteTaskInbox,
+)
 
 __all__ = [
     "AgentResult",
@@ -59,5 +63,4 @@ __all__ = [
     "SqliteTaskInbox",
     "PostgresStateStore",
     "PostgresTaskInbox",
-    "TramaTuiApp",
 ]
