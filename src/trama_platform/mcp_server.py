@@ -35,11 +35,14 @@ class TramaApiClient:
         *,
         task_base_url: str | None = None,
         task_token: str | None = None,
+        api_token: str | None = None,
         http_client: httpx.Client | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.task_base_url = task_base_url.rstrip("/") if task_base_url else None
         self.task_token = task_token
+        from .settings import TramaSettings
+        self.api_token = api_token or TramaSettings.from_env().api_token
         self.http_client = http_client or httpx.Client()
 
     def _post(
@@ -51,7 +54,9 @@ class TramaApiClient:
         base_url: str | None = None,
     ) -> Any:
         response = self.http_client.post(
-            f"{base_url or self.base_url}{path}", json=dict(payload), headers=headers
+            f"{base_url or self.base_url}{path}", json=dict(payload),
+            headers=headers or ({"Authorization": f"Bearer {self.api_token}"}
+                                if self.api_token and base_url is None else None)
         )
         if response.is_error:
             try:
@@ -62,7 +67,9 @@ class TramaApiClient:
         return response.json()
 
     def _get(self, path: str) -> Any:
-        response = self.http_client.get(f"{self.base_url}{path}")
+        response = self.http_client.get(f"{self.base_url}{path}",
+                                       headers={"Authorization": f"Bearer {self.api_token}"}
+                                       if self.api_token else None)
         if response.is_error:
             try:
                 detail = response.json().get("detail", response.text)

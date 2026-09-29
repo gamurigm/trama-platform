@@ -10,6 +10,26 @@ from typing import Callable, Sequence
 
 
 def _is_running(pid: int) -> bool:
+    if pid < 1:
+        return False
+    if os.name == "nt":
+        # os.kill(pid, 0) can terminate a Windows process on some Python builds.
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.WaitForSingleObject.restype = wintypes.DWORD
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel32.OpenProcess(0x00100000, False, pid)
+        if not handle:
+            return ctypes.get_last_error() == 5  # Access denied: assume live, then check ownership.
+        try:
+            return kernel32.WaitForSingleObject(handle, 0) == 258
+        finally:
+            kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except OSError:

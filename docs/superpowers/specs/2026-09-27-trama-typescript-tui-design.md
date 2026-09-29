@@ -1,6 +1,6 @@
 # TRAMA TypeScript TUI Design
 
-**Status:** Approved in conversation; awaiting review of this written specification.
+**Status:** Approved for implementation in conversation.
 
 ## Goal
 
@@ -54,11 +54,21 @@ interface. Approval remains a separate, explicit action. Configuration changes
 that require a process restart are shown as pending until the operator applies
 them.
 
+### Visual direction
+
+Make the terminal experience feel like a polished operations console rather
+than a raw table view. Use a deep navy base, violet and cyan accents, amber for
+pending approvals, and coral for blocked/error states. Give navigation,
+selection, status, and actions a clear visual hierarchy; use compact panels,
+readable progress indicators, and deliberate empty/loading/error states. Keep
+layouts useful at narrow terminal widths and preserve high text contrast.
+
 ### Integration status and configuration
 
-Show status as distinct states such as **connected**, **configured but
-unreachable**, **not configured**, **not installed**, **stopped**, and **not
-implemented**. A saved URL or token alone must never be reported as a working
+Show status as distinct states such as **connected**, **available** (exposed
+locally but with no remote session to check), **configured but unreachable**,
+**not configured**, **not installed**, **stopped**, and **not implemented**.
+A saved URL or token alone must never be reported as a working
 connection.
 
 Cover settings already represented by TRAMA for CCCC coordination, Hermes/MCP,
@@ -134,7 +144,9 @@ dependency. Update the README so it documents one TUI and its controls.
    active until the operator changes that configuration.
 7. The Python Textual implementation and its dedicated test file are removed;
    no duplicate Python TUI remains.
-8. The TypeScript UI build/type validation and manual terminal flows succeed.
+8. The visual system is consistent across views, status remains legible, and
+   panels adapt to narrow terminal widths.
+9. The TypeScript UI build/type validation and manual terminal flows succeed.
 
 ## Out of scope
 

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -65,7 +67,9 @@ class HermesAdapter:
                     "args": [
                         "run",
                         "--project",
-                        ".",
+                        str((self.cwd or Path(__file__).resolve().parents[2]).resolve()),
+                        "--directory",
+                        str((self.cwd or Path(__file__).resolve().parents[2]).resolve()),
                         "trama",
                         "mcp",
                         "--api-url",
@@ -83,12 +87,29 @@ class HermesAdapter:
         }
 
     def write_config(self, path: str | Path, api_url: str) -> Path:
-        output = Path(path)
+        output = Path(path).expanduser()
+        try:
+            existing = yaml.safe_load(output.read_text(encoding="utf-8")) if output.exists() else {}
+            existing = existing or {}
+            if not isinstance(existing, dict):
+                raise ValueError
+            generated = self.render_config(api_url)
+            servers = existing.setdefault("mcp_servers", {})
+            approvals = existing.setdefault("approvals", {})
+            if not isinstance(servers, dict) or not isinstance(approvals, dict):
+                raise ValueError
+            servers["trama"] = generated["mcp_servers"]["trama"]
+            approvals.update(generated["approvals"])
+        except (ValueError, yaml.YAMLError):
+            raise ValueError("Configuración Hermes no válida; no se modificó el archivo") from None
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(
-            yaml.safe_dump(self.render_config(api_url), sort_keys=False, allow_unicode=True),
-            encoding="utf-8",
-        )
+        fd, temporary = tempfile.mkstemp(dir=output.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                yaml.safe_dump(existing, stream, sort_keys=False, allow_unicode=True)
+            os.replace(temporary, output)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
         return output
 
     def launch(self, extra_args: Sequence[str] = ()) -> subprocess.Popen[str]:

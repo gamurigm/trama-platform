@@ -37,7 +37,7 @@ func (s *PostgresStore) Claim(ctx context.Context, limit int) ([]Event, error) {
             attempts = attempts + 1
         FROM ready
         WHERE outbox.event_id = ready.event_id
-        RETURNING outbox.event_id, outbox.event_type, outbox.payload`, limit, claimToken)
+		RETURNING outbox.event_id, outbox.event_type, outbox.payload, outbox.task_id, outbox.created_at`, limit, claimToken)
 	if err != nil {
 		return nil, fmt.Errorf("claim outbox rows: %w", err)
 	}
@@ -46,7 +46,7 @@ func (s *PostgresStore) Claim(ctx context.Context, limit int) ([]Event, error) {
 	var events []Event
 	for rows.Next() {
 		var event Event
-		if err := rows.Scan(&event.ID, &event.Type, &event.Payload); err != nil {
+		if err := rows.Scan(&event.ID, &event.Type, &event.Payload, &event.TaskID, &event.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan outbox row: %w", err)
 		}
 		event.Subject = "trama." + event.Type

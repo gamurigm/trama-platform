@@ -211,7 +211,7 @@ test("keeps both panel titles visible in a narrow terminal", async () => {
   await destroy(setup);
 });
 
-test("stacks App panels at 48 columns while preserving dashboard fields", async () => {
+test("keeps overview and task fields reachable by keyboard at 48 columns", async () => {
   let resolveDashboard!: (value: DashboardData) => void;
   const client = { getDashboard: () => new Promise<DashboardData>((resolve) => { resolveDashboard = resolve; }) };
   const setup = await renderApp(client, 48);
@@ -220,18 +220,23 @@ test("stacks App panels at 48 columns while preserving dashboard fields", async 
     resolveDashboard(appDashboard);
   });
   await act(async () => {
-    await setup.waitForFrame((frame) => frame.includes("Run tests"));
+    await setup.waitForFrame((frame) => frame.includes("Diseño"));
+  });
+  const initial = setup.captureCharFrame();
+  expect(initial).toContain("Fases");
+  expect(initial).toContain("Agentes");
+  expect(initial).toContain("1/2");
+  await act(async () => {
+    setup.mockInput.pressKey("\x1b[6~");
+    await setup.renderOnce();
   });
   const frame = setup.captureCharFrame();
 
-  expect(frame).toContain("Fases");
-  expect(frame).toContain("Agentes CCCC");
-  expect(frame).toContain("Tareas");
+  expect(frame).toContain("Cola de trabajo");
   expect(frame).toContain("ESTADO");
   expect(frame).toContain("OBJETIVO");
   expect(frame).toContain("AGENTE");
   expect(frame).toContain("ORIGEN");
   expect(frame).toContain("Run tests");
-  expect(frame).toContain("1/2");
   await destroy(setup as never);
 });

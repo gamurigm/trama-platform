@@ -535,6 +535,15 @@ class TramaRuntime:
         )
         self.phases.update({item.phase_id: item for item in self.state_store.load_phases()})
 
+    def _refresh_persisted_tasks(self) -> None:
+        if self.state_store is None:
+            return
+        persisted = {item.task_id: item for item in self.state_store.load_tasks()}
+        with self._task_lock:
+            self.tasks.update(persisted)
+            if isinstance(self.coordination, InMemoryCoordination):
+                self.coordination.tasks.update(persisted)
+
     def _dispatch_admitted_task(self, task: TaskEnvelope, *, action: str) -> str:
         project = self.projects.get(task.project_id)
         if task.organization_id != project.organization_id:
@@ -770,11 +779,15 @@ class TramaRuntime:
         return self.projects.get(project_id)
 
     def list_tasks(self) -> list[TaskEnvelope]:
-        return list(self.tasks.values())
+        self._refresh_persisted_tasks()
+        with self._task_lock:
+            return list(self.tasks.values())
 
     def get_task(self, task_id: str) -> TaskEnvelope:
+        self._refresh_persisted_tasks()
         try:
-            return self.tasks[task_id]
+            with self._task_lock:
+                return self.tasks[task_id]
         except KeyError as exc:
             raise KeyError(f"La tarea {task_id} no esta registrada") from exc
 
@@ -950,6 +963,9 @@ class TramaRuntime:
             return self.proposals[proposal_id]
         except KeyError as exc:
             raise KeyError(f"La propuesta {proposal_id} no esta registrada") from exc
+
+    def list_plan_proposals(self) -> list[PlanProposal]:
+        return sorted(self.proposals.values(), key=lambda proposal: proposal.created_at)
 
     def _parallel_groups(self, phases: list[ProjectPhase]) -> list[dict[str, list[str]]]:
         groups: dict[tuple[str, ...], list[ProjectPhase]] = {}

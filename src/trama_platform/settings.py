@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 
@@ -67,42 +67,39 @@ class TramaSettings:
 
     @property
     def state_path(self) -> Path:
-        return Path(self.state_dir) / "trama.db"
+        root = Path(self.state_dir)
+        if not root.is_absolute() and os.getenv("TRAMA_APP_ROOT"):
+            root = Path(os.environ["TRAMA_APP_ROOT"]) / root
+        return root / "trama.db"
 
     @classmethod
-    def from_env(cls) -> "TramaSettings":
-        api_host = os.getenv("TRAMA_API_HOST", "127.0.0.1")
-        api_port = _read_int("TRAMA_API_PORT", 8090)
-        return cls(
-            environment=os.getenv("TRAMA_ENV", "local"),
-            organization_id=os.getenv("TRAMA_ORGANIZATION_ID", "default"),
-            state_dir=os.getenv("TRAMA_STATE_DIR", "artifacts/state"),
-            api_host=api_host,
-            api_port=api_port,
-            api_url=os.getenv("TRAMA_API_URL", f"http://{api_host}:{api_port}"),
-            api_token=os.getenv("TRAMA_API_TOKEN") or None,
-            gateway_url=os.getenv("TRAMA_GATEWAY_URL") or None,
-            gateway_token=os.getenv("TRAMA_GATEWAY_TOKEN") or None,
-            coordination_backend=os.getenv("TRAMA_COORDINATION_BACKEND", "memory"),
-            cccc_executable=os.getenv("TRAMA_CCCC_EXECUTABLE", "cccc"),
-            cccc_timeout_seconds=_read_int("TRAMA_CCCC_TIMEOUT_SECONDS", 30),
-            queue_capacity=_read_positive_int("TRAMA_QUEUE_CAPACITY", 100),
-            max_concurrency=_read_positive_int("TRAMA_MAX_CONCURRENCY", 4),
-            dispatch_timeout_seconds=_read_positive_int(
-                "TRAMA_DISPATCH_TIMEOUT_SECONDS", 900
-            ),
-            semantica_kg_path=os.getenv("TRAMA_SEMANTICA_KG_PATH") or None,
-            utopia_url=os.getenv("TRAMA_UTOPIA_URL") or None,
-            utopia_kb_id=os.getenv("TRAMA_UTOPIA_KB_ID") or None,
-            utopia_token=os.getenv("TRAMA_UTOPIA_TOKEN") or None,
-            colibri_url=os.getenv("TRAMA_COLIBRI_URL") or None,
-            colibri_model=os.getenv("TRAMA_COLIBRI_MODEL") or None,
-            nats_url=os.getenv("TRAMA_NATS_URL", "nats://127.0.0.1:4222"),
-            nats_stream=os.getenv("TRAMA_NATS_STREAM", "TRAMA_EVENTS"),
-            nats_subject=os.getenv("TRAMA_NATS_SUBJECT", "trama.task.admitted.v1"),
-            nats_durable=os.getenv("TRAMA_NATS_DURABLE", "trama-python-dispatch"),
-            hermes_executable=os.getenv("TRAMA_HERMES_EXECUTABLE", "hermes"),
-            hermes_config_path=os.getenv(
-                "TRAMA_HERMES_CONFIG_PATH", _default_hermes_config_path()
-            ),
+    def from_env(cls, *, store=None, vault=None) -> "TramaSettings":
+        from .credential_store import SECRET_NAMES, CredentialStore
+        from .user_config import UserConfigStore, env_name
+
+        store = store or UserConfigStore()
+        vault = vault or CredentialStore()
+        values = asdict(cls())
+        values["hermes_config_path"] = _default_hermes_config_path()
+        values.update(store.read())
+        for name in SECRET_NAMES:
+            values[name] = os.getenv(env_name(name)) or vault.get(name) or None
+        for name, default in asdict(cls()).items():
+            raw = os.getenv(env_name(name))
+            if raw is not None and name not in SECRET_NAMES:
+                if isinstance(default, int):
+                    try:
+                        values[name] = int(raw)
+                    except ValueError:
+                        raise ValueError(f"{env_name(name)} debe ser un entero") from None
+                    if values[name] < 1:
+                        raise ValueError(f"{env_name(name)} debe ser mayor que cero")
+                else:
+                    values[name] = raw or default
+        values["api_url"] = (
+            os.getenv("TRAMA_API_URL") or f"http://{values['api_host']}:{values['api_port']}"
         )
+        for name in SECRET_NAMES:
+            if values[name]:
+                CredentialStore().validate(name, values[name])
+        return cls(**values)

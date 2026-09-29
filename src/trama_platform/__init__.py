@@ -28,7 +28,6 @@ from .mcp_server import TramaApiClient, create_mcp_server
 from .nats_consumer import TaskAdmittedConsumer
 from .runtime import TramaRuntime
 from .state_store import SqliteStateStore, SqliteTaskInbox
-from .tui import TramaTuiApp
 
 __all__ = [
     "AgentResult",
@@ -57,5 +56,4 @@ __all__ = [
     "GatewaySupervisor",
     "SqliteStateStore",
     "SqliteTaskInbox",
-    "TramaTuiApp",
 ]

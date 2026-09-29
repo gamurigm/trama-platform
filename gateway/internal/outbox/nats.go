@@ -3,6 +3,7 @@ package outbox
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/nats-io/nats.go"
 )
@@ -25,6 +26,7 @@ func (p *NATSPublisher) Publish(ctx context.Context, event Event) error {
 	message := nats.NewMsg(event.Subject)
 	message.Data = event.Payload
 	message.Header.Set("Nats-Msg-Id", event.ID)
+	message.Header.Set("Trama-Published-At", time.Now().UTC().Format(time.RFC3339Nano))
 	if _, err := p.client.PublishMsg(message, nats.Context(ctx), nats.MsgId(event.ID)); err != nil {
 		return fmt.Errorf("publish JetStream event: %w", err)
 	}

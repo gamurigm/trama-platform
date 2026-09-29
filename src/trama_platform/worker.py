@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -29,6 +30,10 @@ async def serve_task_worker(
 ) -> None:
     """Sirve tareas admitidas usando un runtime y conexión inyectables."""
 
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
     owns_runtime = runtime is None
     runtime_instance = runtime or TramaRuntime(
         state_store=SqliteStateStore(settings.state_path),
