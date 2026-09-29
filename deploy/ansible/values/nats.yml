@@ -1,0 +1,16 @@
+config:
+  cluster:
+    enabled: false
+    replicas: 1
+  jetstream:
+    enabled: true
+    fileStore:
+      enabled: true
+      pvc:
+        enabled: true
+        size: 8Gi
+        name: trama-nats-js
+fullnameOverride: trama-nats
+container:
+  image:
+    tag: 2.11.0-alpine

@@ -1,0 +1,15 @@
+auth:
+  username: trama
+  database: trama
+  existingSecret: trama-postgresql-auth
+  secretKeys:
+    adminPasswordKey: postgres-password
+    userPasswordKey: password
+architecture: standalone
+primary:
+  persistence:
+    enabled: true
+    size: 8Gi
+metrics:
+  enabled: false
+fullnameOverride: trama-postgresql
