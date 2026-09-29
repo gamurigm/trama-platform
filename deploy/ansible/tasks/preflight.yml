@@ -1,0 +1,57 @@
+---
+- name: Check required local executables
+  ansible.builtin.command:
+    argv:
+      - bash
+      - -lc
+      - "command -v {{ item }}"
+  loop:
+    - kubectl
+    - helm
+    - minikube
+    - docker
+  changed_when: false
+
+- name: Read the active Kubernetes context
+  ansible.builtin.command:
+    argv: [kubectl, config, current-context]
+  register: active_kube_context
+  changed_when: false
+
+- name: Require the local Minikube context
+  ansible.builtin.assert:
+    that:
+      - active_kube_context.stdout == minikube_profile
+    fail_msg: >-
+      Refusing to deploy: kubectl context must be '{{ minikube_profile }}',
+      current context is '{{ active_kube_context.stdout }}'.
+
+- name: Check that the Minikube node is running
+  ansible.builtin.command:
+    argv: [minikube, status, --profile, "{{ minikube_profile }}", --format, "{{ '{{' }}.Host{{ '}}' }}"]
+  register: minikube_host_status
+  changed_when: false
+
+- name: Require a running Minikube node
+  ansible.builtin.assert:
+    that:
+      - minikube_host_status.stdout | trim == 'Running'
+    fail_msg: "Start the '{{ minikube_profile }}' Minikube profile before deployment."
+
+- name: Check Docker daemon connectivity
+  ansible.builtin.command:
+    argv: [docker, info, --format, "{{ '{{' }}.ServerVersion{{ '}}' }}"]
+  changed_when: false
+
+- name: Ensure the application namespace exists
+  ansible.builtin.command:
+    argv: [kubectl, create, namespace, "{{ kube_namespace }}", --dry-run=client, -o, yaml]
+  register: namespace_manifest
+  changed_when: false
+
+- name: Apply the namespace manifest
+  ansible.builtin.command:
+    argv: [kubectl, apply, -f, -]
+    stdin: "{{ namespace_manifest.stdout }}"
+  register: namespace_apply
+  changed_when: "'created' in namespace_apply.stdout"
