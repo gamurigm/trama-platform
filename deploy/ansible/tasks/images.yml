@@ -1,0 +1,46 @@
+---
+- name: Build local container images
+  ansible.builtin.command:
+    argv: "{{ item.argv }}"
+  loop:
+    - argv:
+        - docker
+        - build
+        - --file
+        - "{{ project_root }}/gateway/Dockerfile"
+        - --build-arg
+        - TRAMA_BINARY=trama-gateway
+        - --tag
+        - trama-gateway:local
+        - "{{ project_root }}"
+    - argv:
+        - docker
+        - build
+        - --file
+        - "{{ project_root }}/gateway/Dockerfile"
+        - --build-arg
+        - TRAMA_BINARY=trama-outbox
+        - --tag
+        - trama-outbox:local
+        - "{{ project_root }}"
+    - argv:
+        - docker
+        - build
+        - --file
+        - "{{ project_root }}/deploy/Dockerfile"
+        - --tag
+        - trama-python:local
+        - "{{ project_root }}"
+  loop_control:
+    label: "{{ item.argv[item.argv | length - 2] }}"
+
+- name: Load local images into Minikube
+  ansible.builtin.command:
+    argv:
+      - minikube
+      - image
+      - load
+      - "{{ item }}"
+      - --profile
+      - "{{ minikube_profile }}"
+  loop: "{{ local_images }}"

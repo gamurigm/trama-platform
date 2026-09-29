@@ -1,0 +1,26 @@
+---
+project_root: "{{ playbook_dir }}/../.."
+kube_namespace: trama
+minikube_profile: minikube
+vault_file: "{{ lookup('env', 'HOME') }}/.config/trama/vault.yml"
+
+gateway_release: trama-gateway
+postgresql_release: trama-postgresql
+nats_release: trama-nats
+redis_release: trama-redis
+
+postgresql_chart: oci://registry-1.docker.io/bitnamicharts/postgresql
+postgresql_chart_version: 15.5.38
+nats_chart: nats/nats
+nats_chart_version: 1.2.7
+redis_chart: oci://registry-1.docker.io/bitnamicharts/redis
+redis_chart_version: 20.11.4
+
+local_images:
+  - trama-gateway:local
+  - trama-outbox:local
+  - trama-python:local
+
+database_service: trama-postgresql
+nats_service: trama-nats
+redis_service: trama-redis-master
