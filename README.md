@@ -21,7 +21,7 @@ está en [docs/arquitectura-trama.svg](docs/arquitectura-trama.svg).
 
 ### Servicios nativos configurados
 
-Consulta los servicios locales configurados con `trama services status --json`.
+Usa `trama services status --json` para consultar los servicios nativos configurados.
 Semantica requiere `TRAMA_SEMANTICA_ENABLED`; Utopia se incorpora cuando
 `TRAMA_UTOPIA_MCP_URL` está definido.
 
@@ -55,7 +55,7 @@ interna; el acceso público debe pasar por el gateway.
 El piloto local con Minikube y Ansible está documentado en
 [deploy/ansible/README.md](deploy/ansible/README.md).
 
-### Conectar CCCC del host Windows
+#### CCCC del host Windows desde el worker Docker
 
 Para conectar el worker Docker con CCCC en Windows, configura
 `TRAMA_COORDINATION_BACKEND=cccc-bridge`. Consulta la IP de `vEthernet (WSL)`:
@@ -64,9 +64,9 @@ Para conectar el worker Docker con CCCC en Windows, configura
 Get-NetIPAddress -InterfaceAlias "vEthernet (WSL)" -AddressFamily IPv4
 ```
 
-En PowerShell, configura el actor aprobado, el destinatario de resultados y un
-token compartido con Compose. El token se solicita sin mostrarlo ni escribirlo
-en el historial:
+En la terminal PowerShell que ejecutará el puente, configura el actor aprobado,
+el destinatario de resultados y un token compartido con Compose. El token se
+solicita sin mostrarlo ni escribirlo en el historial:
 
 ```powershell
 $env:TRAMA_CCCC_ALLOWED_ACTORS = "<actor-CCCC-aprobado>"
@@ -76,6 +76,8 @@ $env:TRAMA_CCCC_BRIDGE_TOKEN = [System.Net.NetworkCredential]::new("", $secure).
 Remove-Variable secure
 trama cccc-bridge --host <IP-de-vEthernet-WSL> --port 8091
 ```
+
+El comando rechaza tareas de actores no aprobados y exige el token compartido.
 
 En WSL, configura el mismo backend, URL y token antes de recrear los servicios:
 

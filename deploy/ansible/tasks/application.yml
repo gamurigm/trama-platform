@@ -15,6 +15,21 @@
       - --timeout
       - 10m
 
+- name: Restart TRAMA workloads after loading local images
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - rollout
+      - restart
+      - "deployment/{{ item }}"
+      - --namespace
+      - "{{ kube_namespace }}"
+  loop:
+    - trama-gateway
+    - trama-gateway-outbox
+    - trama-gateway-control-plane
+    - trama-gateway-python-worker
+
 - name: Wait for TRAMA workloads to become ready
   ansible.builtin.command:
     argv:

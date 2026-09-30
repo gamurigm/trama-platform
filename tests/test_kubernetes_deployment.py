@@ -57,8 +57,34 @@ class LocalKubernetesDeploymentTests(unittest.TestCase):
         tasks = yaml.safe_load(
             (ROOT / "deploy/ansible/tasks/application.yml").read_text(encoding="utf-8")
         )
+        restart = next(
+            task
+            for task in tasks
+            if task["name"] == "Restart TRAMA workloads after loading local images"
+        )
         rollout = next(
             task for task in tasks if task["name"] == "Wait for TRAMA workloads to become ready"
+        )
+        self.assertLess(tasks.index(restart), tasks.index(rollout))
+        self.assertEqual(
+            restart["loop"],
+            [
+                "trama-gateway",
+                "trama-gateway-outbox",
+                "trama-gateway-control-plane",
+                "trama-gateway-python-worker",
+            ],
+        )
+        self.assertEqual(
+            restart["ansible.builtin.command"]["argv"],
+            [
+                "kubectl",
+                "rollout",
+                "restart",
+                "deployment/{{ item }}",
+                "--namespace",
+                "{{ kube_namespace }}",
+            ],
         )
         self.assertEqual(
             rollout["loop"],

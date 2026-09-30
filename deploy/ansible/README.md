@@ -75,6 +75,11 @@ Secrets desde stdin sin mostrarlos en logs, instala PostgreSQL, NATS y Redis
 con versiones fijadas, y después instala el chart de TRAMA. Es idempotente y
 no contiene tareas que borren releases, PVCs o datos.
 
+PostgreSQL y Redis usan `bitnamilegacy` solo como workaround temporal para este
+piloto local: ese catálogo archivado no recibe actualizaciones ni soporte.
+No promociones estas imágenes a producción; antes cambia a una fuente mantenida
+y valida compatibilidad del chart y restauración de datos.
+
 El estado operativo se consulta con:
 
 ```bash
