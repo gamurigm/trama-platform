@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "opentui": {
+      "source": "cline/cline",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/opentui/SKILL.md",
+      "computedHash": "0e8ffbf43260f39dc76c8ab58486558c0a57cac2f465a2015c6cc864c133344d"
+    }
+  }
+}
