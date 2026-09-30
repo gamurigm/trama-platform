@@ -3,11 +3,39 @@ import hashlib
 import pytest
 
 from scripts.thesis.run_distributed_experiment import (
+    auth_headers,
     parse_args,
     percentile,
     sha256_file,
     summarize_latencies,
 )
+
+
+def test_auth_headers_supply_control_plane_context_and_optional_gateway_token(monkeypatch):
+    monkeypatch.setenv("TRAMA_CONTROL_PLANE_INTERNAL_TOKEN", "internal-test-token")
+    monkeypatch.setenv("TRAMA_GATEWAY_SERVICE_ACCOUNT_TOKEN", "gateway-test-token")
+    args = parse_args([
+        "--run-id", "header-check",
+        "--organization-id", "org-test",
+        "--project-id", "project-test",
+    ])
+
+    gateway, api = auth_headers(args)
+
+    assert gateway == {"Authorization": "Bearer gateway-test-token"}
+    assert api == {
+        "X-TRAMA-Internal-Token": "internal-test-token",
+        "X-Organization-ID": "org-test",
+        "X-Project-ID": "project-test",
+        "X-Actor-ID": "thesis-experiment",
+    }
+
+
+def test_auth_headers_require_internal_token(monkeypatch):
+    monkeypatch.delenv("TRAMA_CONTROL_PLANE_INTERNAL_TOKEN", raising=False)
+    args = parse_args(["--run-id", "missing-token"])
+    with pytest.raises(ValueError, match="TRAMA_CONTROL_PLANE_INTERNAL_TOKEN"):
+        auth_headers(args)
 
 
 def test_percentile_uses_nearest_rank_for_latency_samples():

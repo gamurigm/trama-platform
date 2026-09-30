@@ -28,7 +28,7 @@
   loop:
     - trama-gateway
     - trama-gateway-outbox
-    - trama-gateway-python-api
+    - trama-gateway-control-plane
     - trama-gateway-python-worker
   changed_when: false
 
@@ -61,6 +61,5 @@
 - name: Confirm the persistent storage claims exist
   ansible.builtin.assert:
     that:
-      - "'trama-gateway-python-state' in local_pvcs.stdout"
       - "'trama-postgresql' in local_pvcs.stdout"
       - "'trama-nats' in local_pvcs.stdout"

@@ -33,7 +33,7 @@ El flujo medido es:
 
 ```text
 cliente → gateway Go → transacción PostgreSQL (admisión + proyección + outbox)
-        → publicador outbox → NATS JetStream → worker Python → SQLite compartido
+        → publicador outbox → NATS JetStream → worker Python → PostgreSQL compartido
 ```
 
 El gateway limita solicitudes a 2000 por segundo en la configuración local de
@@ -70,17 +70,23 @@ resultados.
 Desde PowerShell, ejecutar Docker mediante WSL según `AGENTS.md`:
 
 ```powershell
-wsl.exe -d Ubuntu -- sh -lc 'cd /mnt/c/Users/gamur/Documents/TRAMA/trama-platform && docker compose -f deploy/docker-compose.gateway.yml up --build --detach --wait'
+wsl.exe -d Ubuntu -- sh -lc 'cd /mnt/c/Users/gamur/Documents/TRAMA/trama-platform && docker compose -f deploy/docker-compose.gateway.yml -f deploy/docker-compose.experiment.yml up --build --detach --wait'
 ```
 
 Verificar que los siete servicios estén sanos:
 
 ```powershell
-wsl.exe -d Ubuntu -- docker compose -f /mnt/c/Users/gamur/Documents/TRAMA/trama-platform/deploy/docker-compose.gateway.yml ps
+wsl.exe -d Ubuntu -- sh -lc 'cd /mnt/c/Users/gamur/Documents/TRAMA/trama-platform && docker compose -f deploy/docker-compose.gateway.yml -f deploy/docker-compose.experiment.yml ps'
 ```
 
-El stack publica gateway en `127.0.0.1:8080` y control plane en
-`127.0.0.1:8090`. Registrar en el control plane un proyecto experimental con
+El override experimental publica el control plane solo en `127.0.0.1:8090`;
+el gateway está en `127.0.0.1:8080`. Definir
+`TRAMA_CONTROL_PLANE_INTERNAL_TOKEN` con el mismo valor que recibe Compose
+(por defecto local: `trama-local-internal-only`). Si se habilita la autenticación
+del gateway, definir también `TRAMA_GATEWAY_SERVICE_ACCOUNT_TOKEN` con el token
+de cuenta de servicio. El runner envía estas credenciales en las cabeceras sin
+registrarlas en el manifiesto. Registrar en el control plane un proyecto
+experimental con
 `organization_id`, `project_id` y `repository` idénticos a los que se enviarán
 en las tareas. Usar identificadores de organización y proyecto exclusivos de
 la experimentación.
@@ -92,6 +98,7 @@ El runner automatiza los pasos 2–5, calcula resúmenes de latencia y genera
 el entorno Python del proyecto:
 
 ```powershell
+$env:TRAMA_CONTROL_PLANE_INTERNAL_TOKEN = 'trama-local-internal-only'
 .\.venv\Scripts\python.exe scripts\thesis\run_distributed_experiment.py `
   --run-id pilot-20260927-02 --count 100 --concurrency 5
 ```
@@ -128,7 +135,7 @@ Verificar cantidad y publicación de eventos outbox desde Ubuntu WSL, cambiando
 el prefijo por el `run-id` medido:
 
 ```sh
-docker compose -f deploy/docker-compose.gateway.yml exec -T postgres \
+docker compose -f deploy/docker-compose.gateway.yml -f deploy/docker-compose.experiment.yml exec -T postgres \
   psql -U trama -d trama -c "SELECT a.task_id, count(o.event_id) AS outbox_events, bool_and(o.published_at IS NOT NULL) AS published FROM gateway.admissions a LEFT JOIN gateway.outbox o ON o.task_id = a.task_id WHERE a.task_id LIKE 'pilot-20260927-02-%' GROUP BY a.task_id ORDER BY a.task_id;"
 ```
 
@@ -157,10 +164,10 @@ Fecha: 2026-09-27. Docker Engine 29.4.3 y Compose 5.1.3 en WSL Ubuntu. El stack
 levantó PostgreSQL, Redis, NATS, gateway, outbox, control plane y worker; todos
 pasaron el health check.
 
-Se detectó y corrigió una vista obsoleta en el API Python: la API y el worker
-son procesos separados que comparten SQLite, pero las lecturas API no
+En aquella versión con SQLite se detectó y corrigió una vista obsoleta en el API
+Python: la API y el worker eran procesos separados, pero las lecturas API no
 reflejaban escrituras del worker hasta reiniciar el proceso. `TramaRuntime`
-ahora refresca tareas persistidas al listarlas o consultarlas. La prueba de
+pasó a refrescar tareas persistidas al listarlas o consultarlas. La prueba de
 regresión reproduce la escritura desde un segundo store.
 
 Tras reconstruir el control plane con la corrección, una tarea de prueba produjo:

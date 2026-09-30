@@ -1,71 +1,73 @@
 # Diseño: piloto local de Kubernetes para TRAMA
 
-**Fecha:** 2026-09-28
-**Estado:** diseño aprobado para revisión de especificación
+**Fecha:** 2026-09-29
+**Estado:** alineado con la arquitectura distribuida de main; pendiente de validación operativa
 **Alcance:** despliegue local de desarrollo en Minikube dentro de WSL
 
 ## Objetivo
 
-Desplegar el stack distribuido de TRAMA en un clúster local de un nodo usando Ansible para la orquestación y Helm para los releases. El piloto debe reflejar los servicios que hoy se ejecutan con `deploy/docker-compose.gateway.yml`, conservar el estado SQLite usado por la API y el worker, y permitir acceder al gateway únicamente desde el equipo local.
+Desplegar en Minikube el stack distribuido vigente de TRAMA con Ansible y Helm. El piloto debe usar PostgreSQL como estado compartido del gateway, el control plane y el worker; NATS JetStream como transporte durable; y Redis para el rate limit del gateway. Solo el gateway queda accesible desde el host, ligado a localhost.
 
-Este piloto valida empaquetado y operación local. No declara que la plataforma esté lista para producción ni que el worker ejecute todo el flujo CCCC de punta a punta.
+El piloto valida empaquetado y operación local. No declara que la plataforma esté lista para producción ni que el worker complete el flujo hacia CCCC.
 
 ## Diseño aprobado
 
-- Minikube corre dentro de WSL con un solo nodo. Ansible también se ejecuta desde WSL y verifica que el contexto activo de Kubernetes sea `minikube` antes de aplicar cambios.
-- Un namespace `trama` contiene TRAMA y sus dependencias locales.
-- Ansible instala PostgreSQL, NATS con JetStream y Redis como releases Helm separados, con versiones y configuración fijadas en el repositorio. PostgreSQL y JetStream conservan sus datos en PVCs; Redis puede usar almacenamiento efímero para este piloto.
-- Se amplía el chart existente `deploy/helm/trama-gateway` para incluir el API Python, además del gateway Go, el outbox y el worker Python ya representados.
-- Las imágenes de TRAMA se construyen localmente en WSL y se cargan en Minikube. No se requiere un registry externo para el piloto.
-- Todos los Deployments de TRAMA usan una réplica fija y el autoscaling queda desactivado. El API y el worker comparten el PVC SQLite existente, igual que en Compose. Los servicios de infraestructura usan sus propios PVCs cuando requieren persistencia.
-- Los servicios se comunican por DNS interno de Kubernetes. El gateway se alcanza con `kubectl port-forward` ligado a localhost; no se publica un Ingress ni se expone un servicio a la red local.
-- Ansible crea o actualiza los Kubernetes Secrets antes de instalar los charts. Los valores sensibles se guardan en un archivo Ansible Vault fuera del control de versiones, en la configuración del usuario de WSL; los values de Helm solo referencian Secrets.
+- Minikube corre dentro de WSL con un solo nodo. Ansible también se ejecuta desde WSL y comprueba el contexto minikube antes de aplicar cambios.
+- Un namespace trama contiene TRAMA y sus dependencias locales.
+- Ansible instala PostgreSQL, NATS con JetStream y Redis como releases Helm separados y con versiones fijadas. PostgreSQL y JetStream conservan sus datos en PVCs; Redis es efímero en este perfil.
+- El chart vigente ya despliega gateway Go, outbox, control plane Python y worker Python, además del Job de migraciones. El perfil local ajusta sus imágenes y réplicas; no añade una segunda API Python ni un PVC SQLite.
+- Las imágenes de TRAMA se construyen localmente en WSL y se cargan en Minikube. No se requiere un registry externo.
+- Cada Deployment de TRAMA usa una réplica fija; HPA y PDB quedan desactivados para el piloto.
+- Gateway, control plane y worker usan PostgreSQL compartido. El outbox publica eventos a NATS JetStream y Redis gestiona el rate limit.
+- Los Services son internos. El único acceso desde el host es un port-forward del gateway ligado a 127.0.0.1.
+- Ansible carga desde un Vault cifrado las URLs de dependencias, la identidad de servicio del gateway, el token interno del control plane y las credenciales de PostgreSQL. Los Secret se aplican por stdin y se ocultan de los logs.
 
 El flujo operativo queda así:
 
-```mermaid
+~~~mermaid
 flowchart LR
     Dev[Desarrollador en WSL] --> Ansible
     Ansible --> Helm
     Helm --> Infra[PostgreSQL · NATS JetStream · Redis]
-    Helm --> App[Gateway Go · API Python · Outbox · Worker]
+    Helm --> App[Gateway · Outbox · Control plane · Worker]
     App --> Infra
     Dev -->|port-forward en localhost| Gateway[Gateway Service]
-```
+~~~
 
 ## Límites y condiciones
 
-La base de datos SQLite y su PVC compartido son válidos únicamente para este clúster local de un nodo y una réplica. No se permite escalar horizontalmente la API o el worker ni programarlos en nodos distintos. Antes de producción, el estado y el inbox de Python deben migrarse a un almacenamiento compartido, preferentemente PostgreSQL, y la estrategia de concurrencia debe quedar definida.
+El piloto usa un solo nodo y réplicas fijas. PostgreSQL conserva el estado compartido; no se monta un PVC SQLite entre Pods. El resultado no demuestra alta disponibilidad ni recuperación ante desastres.
 
-La implementación actual de `serve_task_worker` crea el runtime con `SqliteStateStore` pero no conecta `build_coordination(settings)`; el comando de API sí configura esa coordinación. Por eso el despliegue puede validar salud de pods, conectividad y persistencia, pero no debe presentarse como validación del flujo productivo del worker hacia CCCC. Ese cableado es una condición de salida hacia producción.
+La salud de Kubernetes y la visibilidad de eventos no demuestran que el worker haya ejecutado una tarea en CCCC. Esa integración requiere una prueba separada contra el servicio CCCC.
 
-Ansible debe fallar si el contexto no es `minikube`, si faltan los secretos requeridos o si las versiones de charts e imágenes no están fijadas. Una actualización normal no elimina PVCs ni el namespace. La eliminación de datos persistidos queda fuera del playbook normal.
+Ansible debe detenerse antes de desplegar si el contexto no es minikube, si el perfil está detenido o si faltan secretos. Un upgrade normal no elimina el namespace ni PVCs.
 
 ## Decisión sobre Harbor, Keycloak y Grafana
 
 | Componente | Decisión para el piloto | Cuándo incorporarlo |
 |---|---|---|
-| Harbor | No instalar. Las imágenes locales se cargan directamente en Minikube. | Cuando el entorno requiera un registry privado compartido, políticas de acceso o gestión centralizada de artefactos. |
-| Keycloak | No instalar. El API queda interno y el acceso local usa el mecanismo de token ya disponible. | Cuando se defina SSO o gestión centralizada de usuarios. El gateway Go ya valida OIDC y claims de organización y scope; el API Python no ofrece hoy ese mismo flujo. |
-| Grafana | No instalar. No se encontró instrumentación de métricas Prometheus de la aplicación. | Después de añadir endpoints de métricas y desplegar Prometheus con retención y objetivos de alertas definidos. El metrics-server de Minikube sirve para métricas de recursos/HPA, no sustituye esa instrumentación. |
+| Harbor | No instalar. Las imágenes locales se cargan directamente en Minikube. | Cuando se requiera un registry privado compartido. |
+| Keycloak | No instalar. El gateway usa la autenticación de servicio configurada para el piloto. | Cuando se defina SSO o gestión centralizada de usuarios. |
+| Grafana | No instalar. El chart no configura métricas Prometheus de aplicación. | Después de definir instrumentación, retención y objetivos de alertas. |
 
 ## Fuera de alcance
 
-- Clúster de producción o de varios nodos, alta disponibilidad, Ingress público, TLS externo y recuperación ante desastres.
-- Migración del almacenamiento SQLite de Python a PostgreSQL, o cambios funcionales para completar la coordinación del worker con CCCC.
+- Clúster de producción o de varios nodos, Ingress público, TLS externo y recuperación ante desastres.
+- Cambios funcionales para completar la coordinación del worker con CCCC.
 - Harbor, Keycloak, Prometheus y Grafana en el clúster local.
-- Escalado horizontal de API, worker u outbox.
-- Cambios de producto, UI o contratos de API.
+- Escalado horizontal de los Deployments de TRAMA.
+- Cambios de producto, UI o contratos públicos de API.
 
 ## Criterios de aceptación
 
-1. Una ejecución documentada de Ansible desde WSL instala o actualiza los releases y puede repetirse sin duplicarlos.
-2. Gateway, API Python, outbox y worker quedan listos con una réplica cada uno; PostgreSQL, NATS JetStream y Redis quedan accesibles por Services internos.
-3. API y worker montan el mismo PVC SQLite en Minikube; PostgreSQL y JetStream conservan sus datos en PVCs.
-4. El único punto de entrada desde el host es el port-forward del gateway ligado a localhost.
-5. No hay credenciales en Git ni valores sensibles en los values de Helm; Ansible valida la presencia de Secrets antes del despliegue.
-6. La documentación distingue claramente el estado saludable de Kubernetes de la validación funcional del worker→CCCC, que está fuera de este piloto.
+1. Ansible valida el contexto y el estado de Minikube antes de crear recursos.
+2. El playbook instala o actualiza los releases y puede repetirse sin duplicarlos.
+3. Gateway, outbox, control plane y worker quedan listos con una réplica cada uno.
+4. PostgreSQL, NATS JetStream y Redis quedan accesibles mediante Services internos; los datos de PostgreSQL y JetStream conservan sus PVCs.
+5. La autenticación del gateway y el token interno del control plane se suministran desde Secrets; no se guardan credenciales en Git ni en values.
+6. Solo el gateway tiene un port-forward hacia 127.0.0.1; el control plane no se expone al host.
+7. La documentación distingue la salud de Kubernetes de la validación funcional del worker hacia CCCC.
 
 ## Evidencia del repositorio
 
-El chart actual `deploy/helm/trama-gateway` contiene gateway, outbox y worker, pero no el API Python; espera PostgreSQL, Redis y NATS externos y configura un PVC SQLite para el worker. `deploy/docker-compose.gateway.yml` ejecuta esas dependencias junto con API y worker, compartiendo el volumen SQLite. El almacén de estado de Python implementa SQLite, y el worker no configura actualmente la coordinación que configura el API. El gateway Go ya soporta OIDC. No se encontró una ruta de métricas Prometheus de la aplicación.
+El chart vigente en deploy/helm/trama-gateway contiene gateway, outbox, control plane, worker y migraciones. El control plane y el worker usan PostgreSQL compartido; JetStream transporta los eventos. deploy/docker-compose.gateway.yml refleja esta arquitectura con PostgreSQL, NATS, Redis y los cuatro workloads de TRAMA.

@@ -7,6 +7,7 @@ import csv
 import hashlib
 import json
 import math
+import os
 import platform
 import re
 import subprocess
@@ -90,9 +91,26 @@ def request_json(
         return response.status, decoded
 
 
+def auth_headers(args: argparse.Namespace) -> tuple[dict[str, str], dict[str, str]]:
+    gateway_token = os.environ.get("TRAMA_GATEWAY_SERVICE_ACCOUNT_TOKEN", "").strip()
+    internal_token = os.environ.get("TRAMA_CONTROL_PLANE_INTERNAL_TOKEN", "").strip()
+    if not internal_token:
+        raise ValueError("set TRAMA_CONTROL_PLANE_INTERNAL_TOKEN before running the experiment")
+    gateway_headers = {"Authorization": f"Bearer {gateway_token}"} if gateway_token else {}
+    api_headers = {
+        "X-TRAMA-Internal-Token": internal_token,
+        "X-Organization-ID": args.organization_id,
+        "X-Project-ID": args.project_id,
+        "X-Actor-ID": "thesis-experiment",
+    }
+    return gateway_headers, api_headers
+
+
 def ensure_project(args: argparse.Namespace) -> None:
     project_url = f"{args.api_url.rstrip('/')}/v1/projects/{urllib.parse.quote(args.project_id)}"
-    status, existing = request_json(project_url, timeout=args.request_timeout)
+    status, existing = request_json(
+        project_url, headers=args.api_headers, timeout=args.request_timeout
+    )
     if status == 200:
         if (
             existing.get("organization_id") != args.organization_id
@@ -120,6 +138,7 @@ def ensure_project(args: argparse.Namespace) -> None:
         f"{args.api_url.rstrip('/')}/v1/projects",
         method="POST",
         payload=manifest,
+        headers=args.api_headers,
         timeout=args.request_timeout,
     )
     if status != 201:
@@ -160,7 +179,7 @@ def measure_task(args: argparse.Namespace, sequence: int) -> dict[str, Any]:
             f"{gateway}/v1/tasks",
             method="POST",
             payload=payload,
-            headers={"Idempotency-Key": key},
+            headers={**args.gateway_headers, "Idempotency-Key": key},
             timeout=args.request_timeout,
         )
         result["admission_ms"] = round((time.perf_counter() - before) * 1000, 3)
@@ -171,7 +190,7 @@ def measure_task(args: argparse.Namespace, sequence: int) -> dict[str, Any]:
             f"{gateway}/v1/tasks",
             method="POST",
             payload=payload,
-            headers={"Idempotency-Key": key},
+            headers={**args.gateway_headers, "Idempotency-Key": key},
             timeout=args.request_timeout,
         )
         result["replay_ms"] = round((time.perf_counter() - before) * 1000, 3)
@@ -186,6 +205,7 @@ def measure_task(args: argparse.Namespace, sequence: int) -> dict[str, Any]:
         organization = urllib.parse.quote(args.organization_id, safe="")
         projection_status, projection = request_json(
             f"{gateway}/v1/tasks/{encoded_task}?organization_id={organization}",
+            headers=args.gateway_headers,
             timeout=args.request_timeout,
         )
         result["gateway_projection_visible"] = bool(
@@ -195,7 +215,9 @@ def measure_task(args: argparse.Namespace, sequence: int) -> dict[str, Any]:
         deadline = time.perf_counter() + args.delivery_timeout
         while time.perf_counter() < deadline:
             worker_status, worker_task = request_json(
-                f"{api}/v1/tasks/{encoded_task}", timeout=args.request_timeout
+                f"{api}/v1/tasks/{encoded_task}",
+                headers=args.api_headers,
+                timeout=args.request_timeout,
             )
             if worker_status == 200 and worker_task.get("task_id") == task_id:
                 result["worker_visible"] = True
@@ -258,6 +280,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
+        args.gateway_headers, args.api_headers = auth_headers(args)
         ensure_project(args)
     except (OSError, TimeoutError, ValueError, RuntimeError) as error:
         print(f"cannot prepare experiment: {error}", file=sys.stderr)

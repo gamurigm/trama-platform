@@ -42,7 +42,7 @@ redis_url: redis://trama-redis-master:6379/0
 nats_url: nats://trama-nats:4222
 gateway_service_account_token: REEMPLAZAR
 gateway_organization_id: REEMPLAZAR
-python_api_token: REEMPLAZAR
+control_plane_internal_token: REEMPLAZAR
 postgresql_username: trama
 postgresql_password: REEMPLAZAR
 postgresql_admin_password: REEMPLAZAR
@@ -87,8 +87,7 @@ kubectl port-forward --address 127.0.0.1 -n trama \
   svc/trama-gateway 8080:8080
 ```
 
-La API Python escucha en un Service `ClusterIP` y no tiene Ingress ni
-port-forward al host. API y worker comparten el PVC RWO para SQLite; por eso
-ambos quedan con una réplica. JetStream y PostgreSQL también conservan PVCs,
-mientras que Redis es temporal. La preparación local no valida la coordinación
-productiva del worker con CCCC.
+El control plane escucha en un Service `ClusterIP` y no tiene Ingress ni
+port-forward al host. El control plane y los workers usan PostgreSQL
+compartido; JetStream conserva su PVC y Redis es temporal en este perfil. La
+preparación local no valida la coordinación productiva del worker con CCCC.
