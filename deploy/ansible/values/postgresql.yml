@@ -5,6 +5,9 @@ auth:
   secretKeys:
     adminPasswordKey: postgres-password
     userPasswordKey: password
+# The pinned chart image tag has moved from bitnami to the legacy catalog.
+image:
+  repository: bitnamilegacy/postgresql
 architecture: standalone
 primary:
   persistence:

@@ -19,6 +19,12 @@ dependencias y reglas.
 La API conserva el estado y las aprobaciones humanas. La arquitectura general
 está en [docs/arquitectura-trama.svg](docs/arquitectura-trama.svg).
 
+### Servicios nativos configurados
+
+Consulta los servicios locales configurados con `trama services status --json`.
+Semantica requiere `TRAMA_SEMANTICA_ENABLED`; Utopia se incorpora cuando
+`TRAMA_UTOPIA_MCP_URL` está definido.
+
 ## Despliegue local
 
 Desde WSL, en la raíz del repositorio:
@@ -46,6 +52,44 @@ docker compose -f deploy/docker-compose.gateway.yml up --build
 Para Kubernetes, usa el chart `deploy/helm/trama-gateway` y configura los
 secretos en un Secret del clúster. No publiques la API Python fuera de la red
 interna; el acceso público debe pasar por el gateway.
+El piloto local con Minikube y Ansible está documentado en
+[deploy/ansible/README.md](deploy/ansible/README.md).
+
+### Conectar CCCC del host Windows
+
+Para conectar el worker Docker con CCCC en Windows, configura
+`TRAMA_COORDINATION_BACKEND=cccc-bridge`. Consulta la IP de `vEthernet (WSL)`:
+
+```powershell
+Get-NetIPAddress -InterfaceAlias "vEthernet (WSL)" -AddressFamily IPv4
+```
+
+En PowerShell, configura el actor aprobado, el destinatario de resultados y un
+token compartido con Compose. El token se solicita sin mostrarlo ni escribirlo
+en el historial:
+
+```powershell
+$env:TRAMA_CCCC_ALLOWED_ACTORS = "<actor-CCCC-aprobado>"
+$env:TRAMA_CCCC_RESULT_RECIPIENT = "foreman"
+$secure = Read-Host "Token local del puente" -AsSecureString
+$env:TRAMA_CCCC_BRIDGE_TOKEN = [System.Net.NetworkCredential]::new("", $secure).Password
+Remove-Variable secure
+trama cccc-bridge --host <IP-de-vEthernet-WSL> --port 8091
+```
+
+En WSL, configura el mismo backend, URL y token antes de recrear los servicios:
+
+```bash
+export TRAMA_COORDINATION_BACKEND=cccc-bridge
+export TRAMA_CCCC_BRIDGE_URL=http://<IP-de-vEthernet-WSL>:8091
+read -r -s -p 'Token local del puente: ' TRAMA_CCCC_BRIDGE_TOKEN
+printf '\n'
+export TRAMA_CCCC_BRIDGE_TOKEN
+docker compose -f deploy/docker-compose.gateway.yml up -d --build control-plane python-worker
+```
+
+Limita el firewall de Windows al adaptador WSL y a su origen. Detén el puente
+con `Ctrl+C` y CCCC con `cccc daemon stop` al terminar.
 
 ## Desarrollo
 

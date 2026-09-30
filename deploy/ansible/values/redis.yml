@@ -1,4 +1,10 @@
 architecture: standalone
+# The pinned chart image tag has moved from bitnami to the legacy catalog.
+image:
+  repository: bitnamilegacy/redis
+global:
+  security:
+    allowInsecureImages: true
 auth:
   enabled: false
 master:

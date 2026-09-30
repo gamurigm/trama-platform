@@ -4,6 +4,8 @@ El piloto corre en un perfil Minikube de un solo nodo dentro de WSL. Docker,
 `kubectl`, Helm y Minikube deben estar disponibles desde Ubuntu WSL, y el
 contexto activo de `kubectl` debe ser `minikube`. El preflight se detiene antes
 de crear recursos si detecta otro contexto o si el nodo no está ejecutándose.
+También valida las nueve credenciales del Vault antes de crear el namespace o
+cargar imágenes.
 
 ## Preparación
 

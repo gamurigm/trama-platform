@@ -12,6 +12,28 @@
     - docker
   changed_when: false
 
+- name: Load the encrypted local Vault file
+  ansible.builtin.include_vars:
+    file: "{{ vault_file }}"
+    name: local_vault
+  no_log: true
+
+- name: Validate required deployment credentials
+  ansible.builtin.assert:
+    that:
+      - local_vault.database_url | default('') | length > 0
+      - local_vault.redis_url | default('') | length > 0
+      - local_vault.nats_url | default('') | length > 0
+      - local_vault.gateway_service_account_token | default('') | length > 0
+      - local_vault.gateway_organization_id | default('') | length > 0
+      - local_vault.control_plane_internal_token | default('') | length > 0
+      - local_vault.postgresql_username | default('') | length > 0
+      - local_vault.postgresql_password | default('') | length > 0
+      - local_vault.postgresql_admin_password | default('') | length > 0
+      - local_vault.postgresql_username == 'trama'
+    fail_msg: "The local Vault is missing required credentials or uses an unsupported PostgreSQL username."
+  no_log: true
+
 - name: Read the active Kubernetes context
   ansible.builtin.command:
     argv: [kubectl, config, current-context]
